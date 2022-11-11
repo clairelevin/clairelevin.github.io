@@ -1,0 +1,249 @@
+---
+layout: post
+title:  "ImaginaryCTF 2022 - wired"
+date:   2022-11-10 15:49:37 -0500
+categories: ctf
+---
+
+
+## Challenge Description
+
+> We found this video on social media, and suspect that it is being used to transmit some information. Can you figure out what the message is?
+> 
+>[wired.mp4](https://imaginaryctf.org/r/oFD5G#wired.mp4) [program.hex](https://imaginaryctf.org/r/dDKeM#program.hex)
+
+## Overview
+![](https://i.imgur.com/j36QvmQ.jpg)
+
+The video file shows an Arduino Uno connected to eight LEDs and a device labeled as a hardware RNG module. The program.hex file is an ihex file, presumably the program being run by the Arduino shown in the video.
+
+From there, we can guess that the Arduino is somehow encoding the characters of the flag and transmitting them to the LEDs.
+
+## Simulating the Arduino
+
+I used [simavr](https://github.com/buserror/simavr) to run the program.hex file. The `board_simduino` program in the `examples` directory of this project is effectively a simulated Arduino that can be debugged using gdb.
+
+ [This writeup](https://ctf.harrisongreen.me/2020/midnightsunctf/avr/) of an AVR challenge from a couple years ago was a really helpful reference for me, and I ended up using more or less the same setup.
+
+To debug the program, I did the following:
+
+* Start gdb using `avr-gdb` and target the simulated Arduino with the command `target remote localhost:1234`.
+* Start simduino with `./simduino.elf -d`. If gdb is running, it should stop the simduino program at the entry point.
+* In gdb, allow the simduino program to continue. At this point, program.hex can be uploaded to simduino using the command `avrdude -p m328p -c arduino -P /tmp/simavr-uart0 -U flash:w:program.hex`.
+
+ I should note that GDB doesn't handle breakpoint addresses correctly. GDB interprets all addresses as being in data memory, so it puts breakpoints in the wrong place - for example, if you try to set a breakpoint at `0x100`, GDB will put the breakpoint at `0x800100`.
+ 
+ The workaround for this is to define all breakpoints in terms of an offset to the program counter. When I first started the program, I defined a variable `$a` that was equal to the program counter at that time (in my case, it was `0x7800`). To set a breakpoint at `0x100`, I could then use the command  `break *($a-0x7800+0x100)`.
+ 
+
+
+## Disassembly
+
+The Arduino Uno is built on the ATmega328 processor, so it uses the AVR instruction set. This means we can disassemble the program.hex file using the command `avr-objdump -m avr -d program.hex`.  (Ghidra also supports the AVR architecture, but it numbers the memory addresses differently from GDB, which was inconvenient. Because of this, I found the disassembly from `avr-objdump` easier to work with most of the time.)
+
+
+```objdump
+   0:	0c 94 5c 00 	jmp	0xb8	;  0xb8
+   4:	0c 94 79 00 	jmp	0xf2	;  0xf2
+   8:	0c 94 79 00 	jmp	0xf2	;  0xf2
+   c:	0c 94 79 00 	jmp	0xf2	;  0xf2
+  10:	0c 94 79 00 	jmp	0xf2	;  0xf2
+  ...
+```
+We can see that the program starts with a large table of jump instructions, presumably interrupt vectors. The `jmp 0xb8` instruction at address 0 tells us that `0xb8` is the actual starting address of the program.
+
+
+## The hardware RNG module
+
+```objdump
+ 3e2:	90 92 7c 00 	sts	0x007C, r9	;  0x80007c
+ 3e6:	80 91 7a 00 	lds	r24, 0x007A	;  0x80007a
+ 3ea:	80 64       	ori	r24, 0x40	; 64
+ 3ec:	80 93 7a 00 	sts	0x007A, r24	;  0x80007a
+ 3f0:	80 91 7a 00 	lds	r24, 0x007A	;  0x80007a
+ 3f4:	86 fd       	sbrc	r24, 6
+ 3f6:	fc cf       	rjmp	.-8      	;  0x3f0
+ 3f8:	90 91 78 00 	lds	r25, 0x0078	;  0x800078
+ 3fc:	80 91 79 00 	lds	r24, 0x0079	;  0x800079
+```
+At address 3e2, we can see several accesses of the addresses`0x78`, `0x79`, and `0x7a`. This doesn't seem like much at first, but a look at [this include file](https://github.com/DarkSector/AVR/blob/master/asm/include/m328Pdef.inc) for the ATmega328 processor reveals that these addresses are actually memory mapped to registers containing information related to the processor's analog-to-digital converter. 
+
+In other words, when the program reads from these addresses, it's probably actually reading from the `A0` pin of the Arduino, where the RNG module is connected. The result of this read is stored in `r24`.
+
+```objdump
+ ;load flag character into r18
+ 414:	29 91       	ld	r18, Y+
+ 416:	fe 01       	movw	r30, r28
+ 418:	31 97       	sbiw	r30, 0x01	; 1
+ 
+ ;XOR flag with random number from A0
+ 41a:	28 27       	eor	r18, r24
+
+ ;store XOR result
+ 41c:	20 83       	st	Z, r18
+```
+After the read from pin `A0`, the result  is then XORed with a character of the flag.
+
+## Generating the XOR key
+
+At first I thought each character of the flag was XORed with the same value, but it's actually a little more complicated than that. The XOR key for each character is generated based on the key used for the previous character.
+
+We can see that the XOR key is generated using the following steps:
+
+
+```objdump 
+ 41e:	9c 01       	movw	r18, r24
+ 420:	21 70       	andi	r18, 0x01	; 1
+ 422:	33 27       	eor	r19, r19
+ ```
+ First, the LSB of the previous XOR key is stored in `r18`.
+ 
+ ```objdump
+ 424:	b6 95       	lsr	r27
+ 426:	a7 95       	ror	r26
+ 428:	97 95       	ror	r25
+ 42a:	87 95       	ror	r24
+ ```
+ Then, the previous XOR key is shifted right. This makes it look like the XOR key is stored in `r27:r26:r25:r24`, but only `r25` and `r24` are actually used. I found that it made the most sense to treat the XOR key as a 16-bit value stored in `r25:r24`.
+ 
+ ```objdump
+ 42c:	23 2b       	or	r18, r19
+ 42e:	11 f0       	breq	.+4      	;  0x434
+ 430:	2d ea       	ldi	r18, 0xAD	; 173
+ 432:	92 27       	eor	r25, r18
+ 434:	ec 16       	cp	r14, r28
+ 436:	fd 06       	cpc	r15, r29
+ 438:	69 f7       	brne	.-38     	;  0x414
+ ```
+Finally, we check whether the LSB of the previous XOR key was 1 or 0. If it was 1, we XOR `r25` (the high byte of the XOR key) with `0xAD`.
+
+I replicated this key generation function with the following Python function:
+```python
+def shift_key(prev_key):
+    new_key = prev_key >> 1
+    if(prev_key & 1 == 1):
+        new_key = new_key ^ 0xAD00
+    return new_key
+```
+
+## The LED Pinout
+
+Now that we know how the flag is encoded in memory, we need to figure out how to interpret the values shown on the LEDs. 
+```objdump
+ 470:	61 e0       	ldi	r22, 0x01	; 1
+ 472:	82 e0       	ldi	r24, 0x02	; 2
+ 474:	0e 94 7b 00 	call	0xf6	;  0xf6
+```
+I noticed that the function at `0xf6` was getting called a lot, and that it always took 2 parameters: a value between 2 and 9 in `r24`, and a value of either 1 or 0 in `r22`. 
+
+Looking at the function at `0xf6`, it's hard to tell exactly what's happening, but it looks like the function sets or clears a single bit from a register, then stores the result somewhere. From there, I guessed that the function turns a given output pin on or off. Since there are 8 connected pins and 8 possible values passed in through `r24`, it's safe to assume that `r24` stores the number of the pin to be modified, and `r22` stores whether the pin should be set or cleared.
+
+At that point, I needed to figure out which pins corresponded to which LEDs. Fortunately, before the flag is transmitted, a function is called that turns on the LED for each pin in order, so we can match the pin numbers to the LEDs. (I didn't notice that pin 9 came before pins 2 through 8 at first, leading to several very painful hours of trying to figure out why none of the values made any sense.) 
+
+
+![](https://i.imgur.com/DZoxjxz.png)
+
+## The Encoded Flag
+
+```objdump
+ ;bit 0
+ 460:	80 fe       	sbrs	r8, 0
+ 462:	04 c0       	rjmp	.+8      	;  0x46c
+ 464:	61 e0       	ldi	r22, 0x01	; 1
+ 466:	89 e0       	ldi	r24, 0x09	; 9
+ 468:	0e 94 7b 00 	call	0xf6	;  0xf6
+
+;bit 1
+ 46c:	81 fc       	sbrc	r8, 1
+ 46e:	04 c0       	rjmp	.+8      	;  0x478
+ 470:	61 e0       	ldi	r22, 0x01	; 1
+ 472:	82 e0       	ldi	r24, 0x02	; 2
+ 474:	0e 94 7b 00 	call	0xf6	;  0xf6
+
+;bit 2
+ 478:	82 fe       	sbrs	r8, 2
+ 47a:	04 c0       	rjmp	.+8      	;  0x484
+ 47c:	61 e0       	ldi	r22, 0x01	; 1
+ 47e:	83 e0       	ldi	r24, 0x03	; 3
+ 480:	0e 94 7b 00 	call	0xf6	;  0xf6
+ ...
+```
+The actual transmission of the flag takes place in these lines. A character of the encoded flag is stored in `r8`, and each bit of this character determines which LEDs should be on.
+
+However, we need to be careful: notice that some bits of the flag character are checked with the `sbrs` (Skip if Bit in Register Set) instruction, and others are checked with `sbrc` (Skip if Bit in Register Clear). An `sbrs` instruction followed by an `rjmp` instruction means that the program takes the jump if the bit being checked was 0. Similarly, `sbrc` followed by `rjmp` takes the jump if the bit being checked was 1.
+
+Effectively, this means that sometimes a lit LED corresponds to a value of 1 and an unlit LED corresponds to a value of 0, but sometimes it's the other way around. Bits 1,3,4, and 7 are checked with `sbrc`, so their LEDs are on if that bit of the flag character was 0. The others are checked with `sbrs`, so their LEDs are on if the bit was 1.
+
+
+When recording the values from the video, I treated a lit LED as a 1 and an unlit LED as a 0, meaning that I had to negate bits 1, 3, 4, and 7 before attempting to decode the flag. 
+```python
+def negate_bits(bits, which_to_negate):
+    new_bits = 0
+    for i in range(8):
+        if i in which_to_negate:
+            new_bits |= (~bits & (1 << i))
+        else:
+            new_bits |= bits & (1 << i)
+    return new_bits
+```
+
+
+
+## Decoding 
+
+At this point, we have all the information we need to decode the video. For each combination of LEDs shown in the video, we need to do the following:
+
+* Write the combination of LEDs as an 8-bit value, using pin 9 as the LSB and pins 2-8 for the following pins. Treat a lit LED as a 1 and an unlit LED as a 0.
+* Negate bits 1, 3, 4, and 7.
+* XOR the result with the corresponding XOR key in the sequence.
+
+Since we know the first character of the flag is `i`, we have all the information we need to generate the sequence of XOR keys, since each XOR key in the sequence is uniquely determined by the  previous key. By XORing `i` with `0b01010110`, the first value shown in the video, we find that the first XOR key in the sequence is `0xa5`. From there, we can calculate all subsequent keys.
+
+The full solve script is given below:
+
+```python=
+#Negate bits from the input
+def negate_bits(bits, which):
+    new_bits = 0
+    for i in range(8):
+        if i in which:
+            new_bits |= (~bits & (1 << i))
+        else:
+            new_bits |= bits & (1 << i)
+    return new_bits
+
+#Generate a new XOR key from the previous key
+def shift_key(prev_key):
+    new_key = prev_key >> 1
+    if(prev_key & 1 == 1):
+        new_key = new_key ^ 0xAD00
+    return new_key
+
+#Generate as many successive XOR keys as we need
+def list_keys(key, num_times):
+    keyList = []
+    keyList.append(key)
+    curr_key = key
+    for i in range(num_times):
+        keyList.append(shift_key(curr_key))
+        curr_key = shift_key(curr_key)
+    return keyList
+
+#XOR each character of the encoded flag
+#with the lower 8 bits of the corresponding XOR key
+def generate_flag(init_val, flag_vals):
+    s = ""
+    theKeys = list_keys(init_val, len(flag_vals))
+    for i in range(len(flag_vals)):
+        s += chr(flag_vals[i]^(theKeys[i] & 0xff))
+    return s
+
+flag_vals = [0b01010110, 0b10101011, 0b01000111, 0b10101000, 0b11001011, 0b01111000, 0b00110101, 0b00010110, 0b10011010, 0b11000111, 0b01011001, 0b00100110, 0b10010011, 0b01001110, 0b10011100, 0b00001111, 0b11111101, 0b10000011, 0b01101101, 0b00101101]
+new_flag_vals = []
+for i in flag_vals: new_flag_vals.append(negate_bits(i, [1,3,4,7]))
+
+print(generate_flag(0xa5, new_flag_vals))
+```
+This successfully prints the flag: `ictf{weird_rng_912b}`
+
+Originally posted at [https://hackmd.io/@clairelevin/ryuqxzQ2q](https://hackmd.io/@clairelevin/ryuqxzQ2q).
