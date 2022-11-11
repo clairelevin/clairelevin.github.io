@@ -11,6 +11,11 @@ permalink: /resume/
 * Major: Physics and Computer Science
 * GPA: 4.00
 
+## Skills
+
+* Programming languages: C++, Python, Java
+* Analysis tools: Ghidra, Binary Ninja, x64dbg, dnSpy
+
 ## Computer Science Coursework
 
 * COP4600: Operating Systems
@@ -37,12 +42,6 @@ permalink: /resume/
 * PHZ3113: Introduction to Theroetical Physics
 * PHY2061: Enriched Physics with Calculus 2
 * PHY2060: Enriched Physics with Calculus 1
-
-
-## Skills
-
-* Programming languages: C++, Python, Java
-* Analysis tools: Ghidra, Binary Ninja, x64dbg, dnSpy
 
 ## Honors and Awards
 
