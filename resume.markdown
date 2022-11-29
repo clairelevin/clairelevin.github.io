@@ -39,7 +39,7 @@ permalink: /resume/
 * PHY4324: Electromagnetism 2
 * PHY3323: Electromagnetism 1
 * PHY4222: Mechanics 2
-* PHZ3113: Introduction to Theroetical Physics
+* PHZ3113: Introduction to Theoretical Physics
 * PHY2061: Enriched Physics with Calculus 2
 * PHY2060: Enriched Physics with Calculus 1
 
