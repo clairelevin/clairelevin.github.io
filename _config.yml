@@ -29,9 +29,23 @@ github_username:  clairelevin
 linkedin_username: claire-levin-a8b50b256
 
 # Build settings
-theme: minima
+#theme: minima
 plugins:
   - jekyll-feed
+  - jekyll-include-cache
+remote_theme: "mmistakes/minimal-mistakes@4.24.0"
+defaults:
+  # _posts
+  - scope:
+      path: ""
+      type: posts
+    values:
+      layout: single
+      read_time: false
+      comments: false
+      share: false
+      related: false
+
 # Exclude from processing.
 # The following items will not be processed, by default.
 # Any item listed under the `exclude:` key here will be automatically added to

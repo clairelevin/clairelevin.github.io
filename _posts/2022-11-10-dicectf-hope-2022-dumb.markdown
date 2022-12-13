@@ -1,8 +1,9 @@
 ---
-layout: post
+layout: single
 title:  "DiceCTF @ HOPE 2022 - dumb"
 date:   2022-11-10 16:10:35 -0500
 categories: ctf
+excerpt: Flag checker using snarkjs
 ---
 
 ## Challenge Description
@@ -12,7 +13,7 @@ categories: ctf
 ## Overview
 We're given a few different files: a folder called `parts`, and two Python scripts called `check.py` and `proof.py`. To make sense of the files in the `parts` folder, we'll first want to look at the `check` script. 
 
-```python=
+```python
 import json
 import subprocess
 
@@ -138,7 +139,7 @@ consts = [23620558573513441, 12007594160496001, 2100220379136001, 18039062790144
 
 At this point, I knew enough to write my own flag checking script. This script takes in a 32-character flag and returns the calculated value of `k4[31]`. After testing this script with several 32-character strings, I found that the output matched the values stored in the `tmp_public.json` files generated after running the `check.py` script with the same string. This proved that the script was correct.
 
-```python=
+```python
 def check_flag(flag_txt):
     flag = []
     for i in flag_txt: flag.append(ord(i))
@@ -192,7 +193,7 @@ This means that to find the values of `k3`, all we need to do is subtract 1 from
 We now have enough information to write the solve script.
 
 
-```python=
+```python
 def generate():
     flag_txt = "hope"
     flag = []

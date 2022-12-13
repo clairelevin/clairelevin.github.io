@@ -1,8 +1,9 @@
 ---
-layout: post
+layout: single
 title:  "MapleCTF 2022 - vm-v2"
 date:   2022-11-10 16:11:40 -0500
 categories: ctf
+excerpt: System Verilog VM
 ---
 
 ## Challenge Description
@@ -120,7 +121,7 @@ Opcode f stops the program.
 ## Analyzing the Program
 
 Now that we have all the opcodes, it's time to figure out what this program actually does. I used the following function to print the instructions associated with each opcode:
-```python=
+```python
 def print_ops():
     for i in range(len(pairs)):
         pair = pairs[i]
@@ -208,7 +209,7 @@ The value from the array at 188 is unchanged from its original value in the data
 
 I used the following function to emulate the program:
 
-```python=
+```python
 def eval_ops():
 
     stack = []

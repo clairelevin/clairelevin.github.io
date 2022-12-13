@@ -1,8 +1,9 @@
 ---
-layout: post
+layout: single
 title:  "Flare-On 9 writeup: 08 - backdoor"
 date:   2022-11-11 23:51:08 -0500
 categories: ctf flareon
+excerpt: Reversing an obfuscated .NET binary
 ---
 
 This year, I attempted Flare-On for the first time and solved all 11 challenges. Of these, challenge 8 was by far the hardest, taking me much longer to solve than any of the others. I started this challenge with literally no knowledge of .NET, so I learned a lot by the end.
