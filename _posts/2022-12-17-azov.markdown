@@ -1,0 +1,81 @@
+---
+layout: single
+title:  "Analyzing the Azov data wiper"
+date:   2022-12-17 21:21:47 -0500
+categories: malware
+excerpt: Reversing a data wiper disguising itself as ransomware
+---
+
+## Introduction
+
+Recently, Check Point Research released [a report](https://research.checkpoint.com/2022/pulling-the-curtains-on-azov-ransomware-not-a-skidsware-but-polymorphic-wiper/) on the Azov "ransomware", which is actually a data wiper. The samples discussed in this report are now available on vx-underground, so I decided to take a look at it myself. In order to get a better learning experience, I tried to do as much as possible on my own before reading the paper in detail.
+
+Though Check Point shared two samples, I primarily analyzed the sample with a ransom note framing security researchers (SHA256 hash of `650f0d694c0928d88aeeed649cf629fc8a7bec604563bca716b1688227e0cc7e`).
+
+![](https://i.imgur.com/rWdMzI5.jpg)
+
+
+## Analysis
+
+### Initial observations
+
+![](https://i.imgur.com/u9a9jY1.jpg)
+
+The file is a 64-bit executable compiled with FASM, meaning that it was written directly in  assembly. It contains only one section, `.code`.
+
+The ransom note `RESTORE_FILES.txt` is stored in plain text, along with the file extension `.azov` that gets appended to the deleted files.
+
+![](https://i.imgur.com/d8OkgLv.jpg)
+
+Additionally, the first part of the file has extremely high entropy. This corresponds to a large block of encrypted data beginning at address `0x401005`.
+
+
+### The VirtualAlloc calls
+
+Looking at the code in Binary Ninja, I noticed several instances of the string 'VirtualAlloc' on the stack. Setting a breakpoint at `VirtualAlloc`, I found that `RWX` segments were being allocated.
+
+At that point, the data at `0x401005` was deobfuscated and read into the newly allocated memory. Some of this data turned out to be additonal code, at which point execution was redirected there. 
+
+### Injection into other executables
+
+In the decrypted code, I noticed a function that compared the extension of a file to `.exe`.
+
+![](https://i.imgur.com/CtS1Yj1.jpg)
+
+Upon closer inspection, it appeared that the program seemed to only be opening files with the extension `.exe`. All other file extensions seemed to be completely ignored.
+
+
+![](https://i.imgur.com/iSCnGgd.jpg)
+
+It took me a while to figure out what was happening here. The program seemed to be traversing every directory in the system and modifying any executables it found, but it wasn't appending the `.azov` extension, nor was it dropping the ransom note. However, I eventually figured out that the program was actually inserting its own code into every executable that it could write to.
+
+
+Once a .exe file is found, the program makes several checks to see whether it is suitable for code injection. The PE headers are checked to ensure that they are correctly formed, and the architecture is checked to see whether it is 64-bit.
+
+![](https://i.imgur.com/kXZr8mL.jpg)
+
+At that point, the program appears to calculate the address where the code is injected. Assuming the target executable is large enough to contain the injected code, the entry point of the target is then overwritten with the Azov program.
+
+![](https://i.imgur.com/gIVwIBK.jpg)
+
+### Deletion of data
+
+Eventually, the program proceeds to overwrite nearly every file in the system with seemingly garbage data. Before doing so, it checks whether the target file is a `.exe` or `.dll` file, a file that has already been deleted, or the ransom note.
+
+![](https://i.imgur.com/Oi6Z4kv.jpg)
+
+If the file does not fall into these categories, it is overwritten. 666 bytes are written at a time, and then the file pointer is advanced another 666 bytes. Once all files in a directory have been overwritten in this way, the ransom note is placed in that directory.
+
+![](https://i.imgur.com/7qYNRbI.jpg)
+
+
+## Final Thoughts
+
+At this point, I read through the Check Point report in more detail and compared it to my own analysis. I found that I had successfully identified the functions responsible for wiping data and backdooring other executables. 
+
+However, I also missed a few key details, including the creation of distinctive mutexes that could help identify an infection and the use of a specific timestamp to decide when the wiping of data should take place.
+
+I should also point out that I knew several important details about this malware's behavior before beginning my analysis, which made my work much easier. Most importantly, I had already read that Azov was a wiper and not ransomware. Had I not known this, my work would have been much harder, as I would have wasted a lot of time looking for an encryption function that did not exist. 
+
+Since I already had very clear expectations for what this malware would do, my work was mainly a matter of matching specific functions to the descriptions in the articles I had read. In the future, I plan to seek out samples I have not read about extensively beforehand, which will give me a more difficult challenge.
+
