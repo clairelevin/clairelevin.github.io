@@ -77,10 +77,6 @@ The original name of this DLL was `X.dll`. Notably, this was a different version
 
 ### Obfuscation Techniques
 
-#### Unused Variables
-
-Most functions in X.dll began by defining a large number of variables that seemingly never get used anywhere. However, the unused variables are automatically detected and greyed out in Binary Ninja, so this didn't cause much of an issue.
-
 #### Control Flow
 
 The program uses a long sequence of if/else instructions to obscure the true order in which the code is run. Every time a set of instructions is run, a state variable is updated with a constant value. Then, this value is checked to determine what segment of code should be run next. As the sequence of state variables has no pattern to it, the true control flow of the program is not at all clear.

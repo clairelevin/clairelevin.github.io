@@ -2,7 +2,7 @@
 layout: single
 title:  "Flare-On 9 writeup: 08 - backdoor"
 date:   2022-11-11 23:51:08 -0500
-categories: ctf flareon
+categories: flareon
 excerpt: Reversing an obfuscated .NET binary
 ---
 
