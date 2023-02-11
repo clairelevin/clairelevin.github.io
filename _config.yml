@@ -33,7 +33,7 @@ plugins:
   - jekyll-feed
   - jekyll-include-cache
 remote_theme: "mmistakes/minimal-mistakes@4.24.0"
-minimal_mistakes_skin: "dirt"
+minimal_mistakes_skin: "sunrise"
 defaults:
   # _posts
   - scope:
@@ -45,6 +45,8 @@ defaults:
       comments: false
       share: false
       related: false
+
+      
 
 # Exclude from processing.
 # The following items will not be processed, by default.
