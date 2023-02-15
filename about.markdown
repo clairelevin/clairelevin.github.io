@@ -10,4 +10,4 @@ I am studying cybersecurity with a primary focus on reverse engineering and malw
 
 I'm also studying quantum computing, and I'm especially interested in the implications that quantum algorithms will have for cryptography. I'm currently taking a quantum computing course where I'm learning to implement quantum algorithms using Qiskit.
 
-You can access my resume [here](/resume/).
+You can access my resume [here](/resume/), and my LinkedIn profile [here](https://www.linkedin.com/in/claire-levin-a8b50b256/).
