@@ -37,7 +37,7 @@ TeslaCrypt uses 256-bit AES encryption in CBC mode. A random key is generated fo
 
 ### Elliptic Curve Diffie-Hellman
 
-To encrypt the random AES key, the program uses a variation of the Elliptic Curve Diffie-Hellman algorithm. This was my first serious look at elliptic curve cryptography, so I've made a separate blog post with a brief overview of how ECDH works. If you're unfamiliar with ECDH, you can find the writeup [here](https://clairelevin.github.io/malware/2023/03/17/ecc.html).
+To encrypt the random AES key, the program uses a variation of the Elliptic Curve Diffie-Hellman algorithm. This was my first serious look at elliptic curve cryptography, so I've made a separate blog post with a brief overview of how ECDH works. If you're unfamiliar with ECDH, you can find the writeup [here](https://clairelevin.github.io/malware/2023/03/18/ecc.html).
 
 The program randomly generates two public/private ECDH keypairs. The first of these keys is used as a master key that can be used to decrypt any file on the victim's system; the second encrypts the AES key and might vary across different files. For the remainder of this writeup, I'll be referring to these keys as the "Round 1 key" and the "Round 2 key."
 
