@@ -1,0 +1,127 @@
+---
+layout: single
+title:  "Introduction to Elliptic Curve Diffie-Hellman"
+date:   2023-03-17 21:34:00 -0400
+categories: malware
+excerpt: An overview of ECDH key exchange
+---
+
+## Overview
+
+This writeup gives a brief overview of the ECDH algorithm, along with a simple Python implementation. I originally intended this to be part of my TeslaCrypt writeup, but it got long enough that I decided to make a separate post.
+
+Much of what I explain here is described in more detail in the Wikipedia pages for [elliptic curve cryptography](https://en.wikipedia.org/wiki/Elliptic-curve_cryptography) and [elliptic curve point multiplication](https://en.wikipedia.org/wiki/Elliptic_curve_point_multiplication), so I highly recommend reading through them if you're interested in a more in-depth explanation.
+
+## Introduction to Elliptic Curves
+
+An elliptic curve is a curve of the form `y**2 = x**3 + ax + b`. For the purposes of elliptic curve cryptography, we will be considering an elliptic curve defined over a finite field.
+
+We can define a group operation over a given elliptic curve in the following way: Consider two points, P and Q, on an elliptic curve. The line connecting those points intersects exactly one other point, R. We consider R to be the sum of P and Q.
+
+In the case where P and Q are the same point, we obviously can't draw a line connecting the points, so we instead take the tangent line to the curve at P. The point P + P is the point where the tangent line intersects the curve.
+
+The identity element is defined as the "point at infinity", which is not a point on the curve. If the line connecting two points on an elliptic curve is vertical, it does not intersect a third point on the curve, but we say that it intersects the point at infinity. Every point P has an inverse -P, which when added to P gives the point at infinity as a result.
+
+Now that we have defined an addition operation over elliptic curves, we can also define scalar multiplication. To multiply a point P by a number k, we simply add P to itself k times.
+
+## Elliptic Curve Diffie-Hellman
+
+### The Elliptic Curve Discrete Logarithm Problem
+
+Suppose we take an initial generator point G, then add it to itself k times to obtain a point kG. This scalar multiplication is easy to compute: if we know G and k, we can compute kG in O(log k) time using a variation of the repeated-squaring algorithm called "double and add", which I'll discuss later. 
+
+However, now suppose we don't know k, but we only know G and kG. It turns out that there is no known polynomial-time algorithm to compute k using this information, making this a good basis for a cryptographic algorithm.
+
+### Key Exchange
+
+ECDH is a key exchange protocol that takes advantage of the difficulty of the elliptic curve discrete logarithm problem. For ECDH, we define a public/private keypair in the following way:
+ 
+* Choose a standard elliptic curve over a finite field. A curve is determined by its coefficients a and b in the equation `y**2 = x**3 + ax + b`, along with a prime modulus p. Additionally, choose a standard base point G. The parameters a, b, p, and G are public values that must be agreed upon in advance by both parties involved in the key exchange protocol.
+* Choose a value k from the integers modulo p. The integer k serves as the private key.
+* Add the point G to itself k times to produce a point kG. The point kG serves as the public key.
+
+Note that a, b, p, and G are neither part of the private key nor the public key: they are standard values used by everyone implementing the algorithm. Some curves are more secure than others, so it is a good idea to use a standard curve that has been verified to be cryptographically secure. For example, TeslaCrypt used the secure curve `secp256k1`, the same curve used in Bitcoin. Its parameters are
+```
+a = 0
+b = 7
+p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
+G = (0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798, 
+     0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8)
+```
+
+Suppose Alice and Bob each generate keypairs (A, AG) and (B, BG) respectively. The ECDH key exchange protocol allows them to use their keypairs to agree on a shared secret using the following steps:
+* Alice sends Bob her public key, AG.
+* Bob sends Alice his public key, BG.
+* Alice knows A and BG, so she adds the point BG to itself A times to obtain the point ABG.
+* Bob knows B and AG, so he adds the point AG to itself B times, which also gets him the point ABG.
+Now that Alice and Bob have agreed on a shared value ABG, they can use this point to generate a key for a symmetric encryption algorithm. For example, they could use the x-coordinate of ABG as an AES key and encrypt all subsequent messages to each other using AES.
+
+Even if an attacker knew AG and BG, they would not be able to determine ABG. Since they do not know A or B, they would not be able to calculate ABG without solving the elliptic curve discrete logarithm problem.
+
+### Python Implementation
+
+A Python implementation of elliptic curve addition and scalar multiplication is given below.
+
+The naive way to perform scalar multiplication would simply be to perform repeated addition, but a much faster algorithm is possible using a similar algorithm to the repeated-squaring method for modular exponentiation. This is known as the double-and-add method, and it is performed using the following steps:
+
+Suppose we want to add a point P to itself n times. We first define three registers:
+* `acc`, to be used as an accumulator. Initialize this to the identity point.
+* `curr`, to store the current exponent. Initialize this to P.
+* `n`, to store the binary representation of n.
+For each bit of n, starting with the LSB and ending with the MSB,
+* if the current bit of n is a 1, add the value in `curr` to `acc`.
+* Add the point in `curr` to itself.
+On step k of this process `curr` contains `(2**k)P`, as the point in `curr` is doubled at each step. By the end of the process, `acc` contains the point nP, which is what we are looking for. 
+
+
+```python
+class Point:
+	def __init__(self, x, y, is_infty=False):
+		if(is_infty):
+			self.is_infty = True
+			x = None
+			y = None
+		else:
+			self.is_infty = False
+			self.x = x
+			self.y = y
+	def __repr__(self):
+		return "x: " + hex(self.x) + "\n" + "y: " + hex(self.y)
+	def __eq__(self, other):
+		return (self.x == other.x and self.y == other.y)
+	def __ne__(self, other):
+		return not self.__eq__(other)
+
+class Curve:
+	def __init__(self, a, b, G, p):
+		self.a = a
+		self.b = b
+		self.G = G
+		self.p = p
+		
+	def add(self, point1, point2):
+		# handle special case for point at infinity
+		if(point2.is_infty): return point1
+		if(point1.is_infty): return point2
+	
+		if(point1 == point2):
+			# calculate (3x_1**2 + a)/(2y_1) mod p
+			l = (3 * pow(point1.x, 2, self.p) + self.a) * pow((2 * point1.y % self.p), -1, self.p)
+		else:
+			# calculate (y_2 - y_1)/ (x_2 - x_1) mod p
+			l = ((point2.y - point1.y) % self.p) * pow(((point2.x - point1.x) % self.p), -1, self.p)
+		x_res = (pow(l, 2, self.p) - point1.x - point2.x) % self.p
+		y_res = (l * (point1.x - x_res) - point1.y) % self.p
+		return Point(x_res, y_res)
+		
+	def double_and_add(self, point, n):
+		acc = Point(None, None, True) #start at point at infinity
+		curr = point
+		while(n != 0):
+			if(n & 1 == 1): acc = self.add(acc, curr)
+			curr = self.add(curr, curr)
+			n = n >> 1
+		return acc
+	def ecdh(self, pub, priv):
+		return self.double_and_add(self, pub, priv).x
+```
