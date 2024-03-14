@@ -46,7 +46,7 @@ encrypted = cipher.encrypt(pad(FLAG, 16))
 print(encrypted)
 ```
 
-This code generates the elliptic curve given by the equation `y**2 = x**3 + 726x + b` over a finite field of order `p`. A generator point `G` is given, along with two private keys `priv_a` and `priv_b`, which are used to generate a shared secret using elliptic curve Diffie-Hellman. (If you're not familiar with this algorithm, here's my [writeup](/malware/2023/03/17/ecc.html) on the basics of how it works.) The shared secret is then used to derive an AES key that encrypts the flag.
+This code generates the elliptic curve given by the equation `y**2 = x**3 + 726x + b` over a finite field of order `p`. A generator point `G` is given, along with two private keys `priv_a` and `priv_b`, which are used to generate a shared secret using elliptic curve Diffie-Hellman. (If you're not familiar with this algorithm, here's my [writeup](/malware/2023/03/18/ecc.html) on the basics of how it works.) The shared secret is then used to derive an AES key that encrypts the flag.
 
 We are given the public keys `A` and `B`, but we do not know either of the private keys `priv_a` or `priv_b`, so we are unable to derive the shared secret. Our goal is to exploit a weakness in the encryption algorithm to calculate `priv_a` or `priv_b`.
 
