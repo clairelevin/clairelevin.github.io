@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Flare-On 10 writeup: 11 - over_the_rainbow"
 date: 2023-11-18 15:06:00 -0500
 categories: flareon
@@ -8,7 +8,7 @@ excerpt: Attacking a weak RSA implementation
 
 This year, I completed Flare-On for the second time. Overall, I found the difficulty to be a significant step up from last year, and I finished with only a week left to spare.
 
-![](/images/over_the_rainbow/scoreboard.png)
+![](/assets/images/over_the_rainbow/scoreboard.png)
 
 I found challenge 11 to be one of the more interesting challenges, as it required a more in-depth understanding of cryptography than last year's ransomware challenge.
 
@@ -22,7 +22,7 @@ After figuring out the argument format, the next thing I tried was to encrypt a 
 
 After encryption, the size of the file was 0x1100 bytes. This suggested to me that the original 0x1000 bytes of the file had been encrypted with a symmetric encryption algorithm, and that the symmetric key had been encrypted with RSA and appended to the end of the file. This is about what I was expecting, as most real ransomware performs its encryption this way.
 
-![](/images/over_the_rainbow/extra_bytes.png)
+![](/assets/images/over_the_rainbow/extra_bytes.png)
 
 ## The Encryption Algorithm
 
@@ -30,11 +30,11 @@ After encryption, the size of the file was 0x1100 bytes. This suggested to me th
 
 I noticed that the string `expand 32-byte k` appeared in the binary, which is a constant that is used in the Salsa20 and ChaCha20 encryption algorithms. This string is accessed in the function `sub_14007ee60`, and the string `d3crypt_m3` is accessed in the same function. This indicated to me that `sub_14007ee60` was the function where the actual encryption took place.
 
-![](/images/over_the_rainbow/enc_loop.png)
+![](/assets/images/over_the_rainbow/enc_loop.png)
 
 It looked like two different random keys were being generated. The first key was 0x30 bytes, and it was concatenated to the `expand 32-byte k` string to form the ChaCha20 matrix. The second key was 0x18 bytes, and it was XORed with the ciphertext after the ChaCha20 encryption was performed. Both keys were then concatenated together and RSA encrypted.
 
-![](/images/over_the_rainbow/keygen.png)
+![](/assets/images/over_the_rainbow/keygen.png)
 
 Looking at how the key was generated, I found that a new key was generated for each encrypted file. The function that generated the key bytes contained the string `crypto\rand\rand_lib.c`, which told me that OpenSSL's random number generation was being used. This function uses `BCryptGenRandom` internally and it is cryptographically secure. This effectively rules out the possibility that we'll be able to break the encryption by guessing the key, so to break the encryption we'll need to focus on the RSA.
 
@@ -43,7 +43,7 @@ Looking at how the key was generated, I found that a new key was generated for e
 
 The RSA encryption function is located at `sub_1400987b0`. The strings in this function helpfully tell us that the source file is located at `crypto/rsa/rsa_ossl.c`.
 
-![](/images/over_the_rainbow/rsa_ossl.png)
+![](/assets/images/over_the_rainbow/rsa_ossl.png)
 
 Comparing this source file to the decompiled code, we can see that the encryption function is [rsa_ossl_public_encrypt](https://github.com/openssl/openssl/blob/master/crypto/rsa/rsa_ossl.c#L99C5-L99C5), and that its arguments and return value are given by `static int rsa_ossl_public_encrypt(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, int padding)`.
 

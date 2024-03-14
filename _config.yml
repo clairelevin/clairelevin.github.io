@@ -20,7 +20,7 @@
 
 title: Claire Levin
 description: >- # this means to ignore newlines until "baseurl:"
-  Physics and computer science major at UF. Reverse engineer with DiceGang and Kernel Sanders.
+  Malware analyst, reverse engineer, and occasional CTFer.
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
 #twitter_username: jekyllrb
@@ -28,12 +28,12 @@ github_username:  clairelevin
 linkedin_username: claire-levin-a8b50b256
 
 # Build settings
-#theme: minima
+theme: minima
+#remote_theme: jekyll/minima
 plugins:
   - jekyll-feed
   - jekyll-include-cache
-remote_theme: "mmistakes/minimal-mistakes@4.24.0"
-minimal_mistakes_skin: "sunrise"
+
 defaults:
   # _posts
   - scope:
@@ -45,8 +45,6 @@ defaults:
       comments: false
       share: false
       related: false
-
-      
 
 # Exclude from processing.
 # The following items will not be processed, by default.

@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "ROPEmporium Writeups"
 date:   2023-08-17 15:50:00 -0400
 categories: ctf
@@ -17,11 +17,11 @@ The challenge binaries and instructions are available [here](https://ropemporium
 
 In order to read the flag, we need to call the function `ret2win`:
 
-![](/images/ropemporium/ret2win.png)
+![](/assets/images/ropemporium/ret2win.png)
 
 Fortunately, we are provided with a vulnerable function. This function allows us to read 0x38 bytes into a buffer of size 0x20, allowing us to overflow the buffer and overwrite the return address.
 
-![](/images/ropemporium/ret2win_pwnme.png)
+![](/assets/images/ropemporium/ret2win_pwnme.png)
 
 We can write 40 bytes to fill the buffer, then overwrite the return address with the address of `ret2win`.
 
@@ -40,11 +40,11 @@ print(chal.recvall())
 
 For this challenge, we will need to do more than just call a single function. We are provided with the command string to open the flag file, but it is not used as an argument to `system()`.
 
-![](/images/ropemporium/split_useful_string.png)
+![](/assets/images/ropemporium/split_useful_string.png)
 
 We are also provided with a call to `system("/bin/ls")`.
 
-![](/images/ropemporium/split_useful_function.png)
+![](/assets/images/ropemporium/split_useful_function.png)
 
 The solution is to load the address of the necessary string into `rdi`, then return to the call to `system()`. To do this, we need the gadget `pop rdi; ret`, which we can find at address `0x4007c3`.
 
@@ -71,7 +71,7 @@ The `callme` functions are located in the external library `libcallme.so`. We ca
 
 To make things easier for us, the challenge provides us with "useful gadgets" that load in the correct arguments. We must return to this gadget before each function call.
 
-![](/images/ropemporium/callme_useful_gadget.png)
+![](/assets/images/ropemporium/callme_useful_gadget.png)
 
 Here is a first attempt at a script:
 
@@ -105,7 +105,7 @@ print(chal.recvall())
 ```
 This script seems like it should work, but it segfaults. What has gone wrong? Looking at the segfault in gdb, it appears that `callme_one` was called with the correct arguments, but the segfault has occurred at a seemingly random point in `fclose()`.
 
-![](/images/ropemporium/callme_segfault.png)
+![](/assets/images/ropemporium/callme_segfault.png)
 
 This left me confused for a while, but it turns out that ROPEmporium has a "common pitfalls" section warning us of this exact problem:
 
@@ -146,7 +146,7 @@ For this challenge, we are given a function called `print_file()` that we must c
 
 The "useful gadget" provided to us this time around is `mov [r14], r15; ret`. If we can load an address we want to write to into `r14` and the string `flag.txt` into `r15`, then we can write `flag.txt` to memory. This will allow us to pass its address to `print_file()` as an argument.
 
-![](/images/ropemporium/write4_useful_gadgets.png)
+![](/assets/images/ropemporium/write4_useful_gadgets.png)
 
 `flag.txt` is exactly 8 bytes long, so it fits into a register. Using the gadget `pop r14; pop r15; ret`, we can pop an address in the `.data` section into `r14` and `flag.txt` into r15. I chose the start of the `.data` section as the address to use for this - it is not used by any other part of the program, and it is all zeroes, meaning that we do not have to worry about null terminating the string. We can then add `mov [r14], r15; ret` as the next part of the chain, allowing us to write the string to memory.
 
@@ -179,7 +179,7 @@ This challenge is identical to the last one, except that we are prevented from u
 
 The useful gadgets for this challenge give us a clue on how to do this. We are given the gadget `xor byte ptr [r15], r14b ; ret`, so we can perform a single-byte XOR on an arbitrary value.
 
-![](/images/ropemporium/badchars_useful_gadgets.png)
+![](/assets/images/ropemporium/badchars_useful_gadgets.png)
 
 To avoid the bad characters, we can XOR each byte of the input string with 0xff, then create a chain that performs the XOR again to restore the original values. At first, I tried to construct the chain like this: 
 
@@ -237,7 +237,7 @@ We need to find some way to write the `flag.txt` string. There aren't many gadge
 
 This is where the "questionable gadgets" come in. If we pop the correct values into `rcx` and `rdx`, then the instruction `bextr rbx, rcx, rdx` allows us to write to `rbx`.
 
-![](/images/ropemporium/fluff_questionable_gadgets.png)
+![](/assets/images/ropemporium/fluff_questionable_gadgets.png)
 
 [Felix Cloutier's description](https://www.felixcloutier.com/x86/bextr) of the `bextr` instruction tells us that it does the following:
 
@@ -286,21 +286,21 @@ print(chal.recvall())
 
 In this challenge, we need to call a library function that is not imported. The `ret2win` function is located in `libpivot.so` at offset `0xa81`:
 
-![](/images/ropemporium/pivot_ret2win.png)
+![](/assets/images/ropemporium/pivot_ret2win.png)
 
 `ret2win` is not imported, but another function called `foothold_function` is. Its offset is `0x96a`:
 
-![](/images/ropemporium/pivot_foothold.png)
+![](/assets/images/ropemporium/pivot_foothold.png)
 
 We do not know where `ret2win` will be loaded into memory, but we know that its offset is `0xa81 - 0x96a = 0x117` from `foothold_function`.
 
 In addition, the `pwnme` function is different from the previous challenge. We are given a very limited amount of space on the stack for our chain, but we have a separate write to 0x100 bytes of memory on the heap. Normally, we would likely have to find some way to leak the address of this heap memory, but in this case the challenge helpfully prints it out.
 
-![](/images/ropemporium/pivot_pwnme.png)
+![](/assets/images/ropemporium/pivot_pwnme.png)
 
 The chain at the pivot address will contain most of what we need to do. The buffer overflow on the stack will only be used to overwrite the original stack pointer with the address of the pivot.
 
-![](/images/ropemporium/pivot_useful_gadgets.png)
+![](/assets/images/ropemporium/pivot_useful_gadgets.png)
 
 The "useful gadgets" allow us to do exactly that: we can pop the location of the pivot into `rax`, then exchange the value of `rax` with that of `rsp`. With the pivot address in `rsp`, we can continue the chain from there.
 
@@ -357,11 +357,11 @@ As the name suggests, we're going to be using two gadgets in the `__libc_csu_ini
 
 There are two main gadgets in `__libc_csu_init()` that we will be using for this chain. The first pops values into `rbx`, `rbp`, `r12`, `r13`, `r14`, and `r15`:
 
-![](/images/ropemporium/ret2csu_gadget1.png)
+![](/assets/images/ropemporium/ret2csu_gadget1.png)
 
 And the second moves values to `rdx`, `rsi`, and `edi` from `r13`, `r14`, and `r15`:
 
-![](/images/ropemporium/ret2csu_gadget2.png)
+![](/assets/images/ropemporium/ret2csu_gadget2.png)
 
 We can chain these two gadgets together in order to write arbitrary values to `rdx` and `rsi`. The second gadget ends in a `call`, but we can choose the address that is called because the first gadget lets us write arbitrary values to `rbx` and `r12`. In order to resume our chain after the call, we want to call a gadget of the form `pop; ret`.
 

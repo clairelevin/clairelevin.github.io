@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Revisiting Emotet"
 date:   2022-12-24 16:57:00 -0500
 categories: malware
@@ -24,7 +24,7 @@ The sample I used in this analysis was obtained from vx-underground, and its SHA
 
 Looking at the entropy of the given sample, we can immediately see a section with very high entropy:
 
-![](/images/emotet_entropy.jpg)
+![](/assets/images/emotet_entropy.jpg)
 
 This appeared to be the same encrypted resource I had encountered when studying Emotet last semester.
 
@@ -32,7 +32,7 @@ This appeared to be the same encrypted resource I had encountered when studying 
 
 The program obfuscates the use of constant values by defining functions that do nothing except return them:
 
-![](/images/emotet_constant_funcs.jpg)
+![](/assets/images/emotet_constant_funcs.jpg)
 
 I wrote a short Binary Ninja plugin to search for functions that do nothing except return a single constant value. When the plugin found one, it automatically renamed the function to show the value it returned.
 
@@ -58,7 +58,7 @@ binaryninja.plugin.PluginCommand.register("Emotet: Fix Opaque Constants", "renam
 ```
 
 Additionally, some operations are obfuscated by performing unnecessary operations and then reversing them, causing some functions to appear more complicated than they are:
-![](/images/emotet_obfuscated_pe.jpg)
+![](/assets/images/emotet_obfuscated_pe.jpg)
 This code appears to be dividing by 9, then immediately multiplying by 9 again.
 
 ### Decrypting The Resource
@@ -67,7 +67,7 @@ Upon closer inspection, the function responsible for decrypting the encrypted re
 
 In fact, looking more closely at the resource, we can directly see what the key must be. The sequence of bytes `35 57 b6 0e 32 52 c2 bc 05 4a 0e 1e df ad 1d fc 40 d8` appears over and over in the resource:
 
-![](/images/emotet_repeated_key.jpg)
+![](/assets/images/emotet_repeated_key.jpg)
 
 We can guess that these correspond to null bytes in the plaintext, meaning that this sequence of bytes is also the XOR key. Performing the XOR, we find that the encrypted resource is a second DLL, as expected.
 
@@ -81,7 +81,7 @@ The original name of this DLL was `X.dll`. Notably, this was a different version
 
 The program uses a long sequence of if/else instructions to obscure the true order in which the code is run. Every time a set of instructions is run, a state variable is updated with a constant value. Then, this value is checked to determine what segment of code should be run next. As the sequence of state variables has no pattern to it, the true control flow of the program is not at all clear.
 
-![](/images/emotet_control_flow.jpg)
+![](/assets/images/emotet_control_flow.jpg)
 
 The sequence of state variables is predetermined, so it should theoretically be possible to reconstruct the control flow. I wasn't able to do this, but I may come back to it once I'm a little more experienced writing plugins for Binary Ninja.
 
@@ -89,7 +89,7 @@ The sequence of state variables is predetermined, so it should theoretically be 
 
 System functions are called by passing a hash of the function's name to the function `sub_1001a607`, which retrieves the correct function based on the hash. Each of the functions from a given library is hashed until a match is found.
 
-![](/images/emotet_hash.jpg)
+![](/assets/images/emotet_hash.jpg)
 
 I was able to recreate the hashing function being used:
 
@@ -105,7 +105,7 @@ I then obtained lists of the names of all standard Windows functions that the pr
 
 Fortunately, the calls to system functions all followed a predictable format. Every call to a system function was wrapped in a helper function that did nothing but return the result of a system function. Additionally, the value of the hash was hard-coded as an argument, which was enough to determine which system function was being called.
 
-![](/images/emotet_call_hashed_func.jpg)
+![](/assets/images/emotet_call_hashed_func.jpg)
 
 In fact, the pattern was predictable enough that it was possible to search for it and rename each of the helper functions automatically in Binary Ninja:
 
@@ -149,7 +149,7 @@ Now that I knew BCrypt was being used, I set a breakpoint at BCryptEncrypt. The 
 
 The first argument to BCryptEncrypt is a `BCRYPT_KEY_HANDLE` struct corresponding to the encryption key. I eventually noticed a 32-byte value that looked like the key itself. This eventually proved to be an AES key in CBC mode, using an IV of zero.
 
-![](/images/emotet_aes.png)
+![](/assets/images/emotet_aes.png)
 
 ### Network Activity
 

@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "ImaginaryCTF 2022 - wired"
 date:   2022-11-10 15:49:37 -0500
 categories: ctf

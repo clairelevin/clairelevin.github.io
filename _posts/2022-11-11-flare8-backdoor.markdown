@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Flare-On 9 writeup: 08 - backdoor"
 date:   2022-11-11 23:51:08 -0500
 categories: flareon

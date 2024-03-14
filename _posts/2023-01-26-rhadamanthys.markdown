@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "VM-based obfuscation in Rhadamanthys Stealer"
 date:   2023-01-26 18:30:00 -0500
 categories: malware
@@ -18,15 +18,15 @@ Looking at the strings in the sample, I immediately noticed a very long string b
 
 Since the string contained only numbers and uppercase letters, I suspected that base32 was being used, but my attempts to decode the string as base32 failed. In the process of looking for a decryption function, I found what appeared to be operations associated with a virtual machine:
 
-![](/images/rhadamanthys/vm.png)
+![](/assets/images/rhadamanthys/vm.png)
 
 Upon closer inspection, I found what appeared to be the opcodes of the virtual machine in memory when this function was called, at an offset of `0xc` from the first argument. Each of the opcodes is stored as a value from 0 to 52, sometimes followed by a single operand in the form of a 32-bit integer.
 
-![](/images/rhadamanthys/opcodes.png)
+![](/assets/images/rhadamanthys/opcodes.png)
 
 The opcodes are also hard-coded in the memory of the program:
 
-![](/images/rhadamanthys/opcodes_struct.png)
+![](/assets/images/rhadamanthys/opcodes_struct.png)
 
 ## Writing a Disassembler
 
@@ -40,7 +40,7 @@ I found that there was a layer of obfuscation designed to obscure which opcodes 
 
 When an instruction is run, the program retrieves the value at the index of the corresponding opcode. Then, a long switch statement compares this value to the index of possible values for each instruction.
 
-![](/images/rhadamanthys/vm_xor.png)
+![](/assets/images/rhadamanthys/vm_xor.png)
 
 For instance, the XOR instruction corresponds to a value of `0x402c1e`, which is at index 48 of the array. Therefore the opcode for XOR is 48.
 
@@ -145,13 +145,13 @@ This explains why attempting to decode the base32 earlier failed: the program is
 
 There's still one more step we have to go through before we can decode the long string. The long string contains several sequences of the characters `0`, `1`, and `2`, which aren't part of the base32 character set that's being used here. 
 
-![](/images/rhadamanthys/invalid_chars.png)
+![](/assets/images/rhadamanthys/invalid_chars.png)
 
 It may be that these sequences are being used to encode information in a different way, but it's entirely possible that they're just there to make it harder to identify the alphabet being used for the base32 encoding. I replaced them all with the character `A` before decoding.
 
 At this point, we finally have our result:
 
-![](/images/rhadamanthys/decoded_b32.png)
+![](/assets/images/rhadamanthys/decoded_b32.png)
 
 We can see that this is the shellcode that's being run in the second stage of the program.
 

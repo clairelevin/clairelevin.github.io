@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "HITCON CTF 2022 - Meow Way"
 date:   2022-11-29  18:04:10 -0500
 categories: ctf

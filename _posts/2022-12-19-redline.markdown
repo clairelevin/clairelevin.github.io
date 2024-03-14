@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Analyzing RedLine"
 date:   2022-12-19 22:11:00 -0500
 categories: malware
@@ -12,34 +12,34 @@ RedLine is an infostealer that steals credentials from a variety of applications
 
 I obtained two samples of RedLine from vx-underground: one with MD5 hash `14c3638c64de46bee97333288e6ffc63` and original name `Wheal.exe`, and one with MD5 hash `e307bef30d37b965e01405176a9e30fe` and original name `Swaling.exe`. The program is a 32-bit .NET executable.
 
-![](/images/redline_detectiteasy.jpg)
+![](/assets/images/redline_detectiteasy.jpg)
 
 
 ## The First Stage
 
 Looking at the executable in dnSpy, we find that the names of all functions have been obfuscated. `Wheal.exe` appears to choose random words used in system functions for its names:
 
-![](/images/wheal_main.jpg)
+![](/assets/images/wheal_main.jpg)
 
  `Swaling.exe` names functions using a similar string of words, but each word is reversed:
 
-![](/images/swaling_main.jpg)
+![](/assets/images/swaling_main.jpg)
 
 Looking through the functions, a long string immediately stands out. The string `NetUnsafeNclNativeMethodsHttpApiTOKENBINDINGRESULTDATAV3408` is a garbage value that gets inserted into most of the strings in this program. Removing it, we are left with valid base64. This decodes to another base64 string, which in turn can be decoded to produce another .NET executable.
 
-![](/images/redline_double_b64encode.jpg)
+![](/assets/images/redline_double_b64encode.jpg)
 
 ## The Second Stage
 
 At this point, I focused my attention on the executable decoded from the base64. This program is much less obfuscated than the initial dropper. With descriptive names like `ScanPasswords` and `GetTokens`, we're very quickly able to get an idea of the sample's capabilities.
 
-![](/images/redline_descriptive_names.jpg)
+![](/assets/images/redline_descriptive_names.jpg)
 
 Notable class names include `AllWalletsRule`, `ArmoryRule`, `BrowserExtensionsRule`, `C_h_r_o_m_e`, `CoinomiRule`, `DesktopMessangerRule`, `DiscordRule`, `ElectrumRule`, `EthRule`, `ExodusRule`, `GameLauncherRule`, `GuardaRule`, `NordApp`, `OpenVPNRule`, and`ProtonVPNRule`. This reveals that the program is designed to steal sensitive data, including cryptocurrency wallets and autofilled browser credentials.
 
 Several strings are obfuscated by inserting garbage characters, then removing them with a simple find and replace. Other than this, there is very little obfuscation.
 
-![](/images/redline_find_and_replace.jpg)
+![](/assets/images/redline_find_and_replace.jpg)
 
 
 ### Initialization
@@ -48,11 +48,11 @@ The entry point contains a class with members `IP`, `ID`, `Message`, and `Key`. 
 
 It appears that the `IP` parameter can sometimes contain multiple domains separated by `|`. The program attempts to create a connection to all IPs listed.
 
-![](/images/redline_connect_out.jpg)
+![](/assets/images/redline_connect_out.jpg)
 
 The `ScanningArgs` class contains parameters corresponding to the different capabilities of the program. This indicates that it might be possible to enable or disable specific scans based on the values of these parameters.
 
-![](/images/redline_scanningargs.jpg)
+![](/assets/images/redline_scanningargs.jpg)
 
 Additionally, a function called `SeenBefore` checks for the presence of a directory called `Yandex\YaAddon` in `AppData\Local`. If the directory does not exist, the program creates it.
 
@@ -62,7 +62,7 @@ Before performing any scans, the program attepts to determine its own location u
 
 If the program doesn't exit, the `ResultFactory` class coordinates most of the actual scanning. First, each parameter of the `ScanningArgs` object `settings` is checked. Then, if the setting is enabled, an object is created that performs the subsequent scan and data collection.
 
-![](/images/redline_resultfactory.jpg)
+![](/assets/images/redline_resultfactory.jpg)
 
 ### Features
 

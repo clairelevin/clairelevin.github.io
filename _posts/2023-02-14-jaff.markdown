@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Writing a decryptor for Jaff ransomware"
 date:   2023-02-14 17:00:00 -0500
 categories: malware
@@ -15,7 +15,7 @@ You can find the sample I used [on MalShare](https://malshare.com/sample.php?act
 
 ## Initial Observations
 
-![](/images/jaff/detectiteasy.png)
+![](/assets/images/jaff/detectiteasy.png)
 
 The sample is a 32-bit PE excutable written in C++. The executable did not seem to import any functions related to cryptography, and it contained a very long chunk of encrypted data. This meant that the most important functions of this program were likely being decrypted dynamically.
 
@@ -25,11 +25,11 @@ By setting breakpoints on `VirtualAlloc` and `VirtualProtect`, I kept track of e
 
 When run, the sample calls itself `Ffv opg me liysj sfssezhz`:
 
-![](/images/jaff/task_manager.png)
+![](/assets/images/jaff/task_manager.png)
 
 Additionally, a GET request is made to `fkksjobnn43[.]org/a5/`. As I don't have access to this C2 server, I have no way of knowing what was expected from this server or whether the encryption process would have proceeded differently if I'd been able to connect.
 
-![](/images/jaff/http_request.png)
+![](/assets/images/jaff/http_request.png)
 
 ### Strings, Imports, and Resources
 
@@ -60,7 +60,7 @@ Additionally, the string `cmd /C del /Q /F %s` found in the program suggests tha
 
 The sample uses 256-bit AES to encrypt files. For debugging purposes, I set a breakpoint on `CryptImportKey` to read the key blob from memory:
 
-![](/images/jaff/cryptimportkey.png)
+![](/assets/images/jaff/cryptimportkey.png)
 
 A new key is generated using `CryptGenKey` each time the program is run.
 
@@ -68,15 +68,15 @@ Beginning with the root directory, the program enumerates all files and subdirec
 
 The `.jaff` extension is appended to the encrypted file, and the AES-encrypted bytes are written. We can see that there are multiple `WriteFile` calls to the encrypted file, revealing that something else is appended to the `.jaff` file before the encrypted data:
 
-![](/images/jaff/writefile.png)
+![](/assets/images/jaff/writefile.png)
 
 The appended value turned out to be the ASCII representation of a large number.
 
-![](/images/jaff/rsa_encrypted_key.png)
+![](/assets/images/jaff/rsa_encrypted_key.png)
 
 Additionally, the ransom note is dropped in each encrypted directory. The note is dropped in text, HTML, and image forms, with file names of `ReadMe.txt`, `ReadMe.html`, and `ReadMe.bmp` respectively.
 
-![](/images/jaff/ransom_note_with_exp.png)
+![](/assets/images/jaff/ransom_note_with_exp.png)
 
 A new victim ID is generated each time the program is run.
 
@@ -88,7 +88,7 @@ I suspected that the long number appended before the encrypted data in the `.jaf
 
 I found that the AES key was being passed as an argument to `sub_402d70`. When passed into this function, the AES key blob was being stored as a decimal representation in little-endian format, with each decimal digit being stored as a 16-bit integer. Each byte of the key blob was converted to three decimal digits; for instance, `08` would be stored as `008` and `8A` would be stored as `138`. Additionally, the digit "1" was appended to the sequence:
 
-![](/images/jaff/aes_decimal.png)
+![](/assets/images/jaff/aes_decimal.png)
 
 For example, during one run of the program, the original AES key blob was the following:
 
@@ -125,7 +125,7 @@ At this point, it was time to look at what `sub_402d70` was actually doing. The 
 
 By experimenting with this subrouting in a debugger, I found that the program was calling functions that performed multiplication and division on arbitrarily large numbers. Sepecifically, the AES key was being squared over and over, and something different was done with the result based on the values in the array of 1s and 0s.
 
-![](/images/jaff/repeated_square.png)
+![](/assets/images/jaff/repeated_square.png)
 
 This proved to be the repeated-squaring method for modular exponentiation. The AES key was being raised to an exponent, which was passed as an argument in binary form in order to aid in the repeated-squaring algorithm. The modulus was the long number stored in the resource.
 
@@ -149,7 +149,7 @@ Upon closer inspection, I found that the public exponent was usually close to th
 
 Eventually, I found that the victim ID seemed to be randomly generated. If a negative number was generated, the bits were negated in order to produce a positive result.
 
-![](/images/jaff/exponent_from_id.png)
+![](/assets/images/jaff/exponent_from_id.png)
 
 After correcting for this, I found that either the victim ID or its negation was always close to the exponent, but there didn't seem to be much of a pattern to the exact difference.
 

@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Solving the Goldbox Crackme"
 date:   2023-09-03 14:37:00 -0400
 categories: ctf
@@ -10,7 +10,7 @@ excerpt: Reversing a crackme with anti-disassembly
 
 ### Challenge Description
 
-![](/images/goldbox/goldbox.png)
+![](/assets/images/goldbox/goldbox.png)
 
 We are asked to enter a key, and the program checks to verify that the key is valid. There are many different valid keys for this challenge, so our goal is to not only find a single key, but to reverse engineer and replicate the validation algorithm.
 
@@ -18,13 +18,13 @@ You can find the challenge on GitHub [here](https://github.com/frank2/crackmes/t
 
 ### Anti-Disassembly
 
-![](/images/goldbox/anti_disasm.png)
+![](/assets/images/goldbox/anti_disasm.png)
 
 Looking at the disassembled code, we can immediately see sequences of instructions that don't make sense. In this screenshot, all disassembly after the `call` instruction is incorrect. However, the function call shown here never returns, so the program never encounters the incorrect instructions. 
 
 There is another function with an entry point at `4011b1`, but the disassembler fails to recognize it, as it has started disassembling a `cmovs` instruction at `4011b0`. If we instead tell the disassembler to start at address `4011b1`, we get a much more reasonable result:
 
-![](/images/goldbox/anti_disasm_fixed.png)
+![](/assets/images/goldbox/anti_disasm_fixed.png)
 
 This anti-disassembly makes it nearly impossible to trace the control flow through static analysis. For the most part, I reconstructed the original control flow by stepping through the code in a debugger one instruction at a time.
 
@@ -32,17 +32,17 @@ This anti-disassembly makes it nearly impossible to trace the control flow throu
 
 We can immediately see a few basic checks being made. The first check verifies that the length of our key is 0x13:
 
-![](/images/goldbox/check_length.png)
+![](/assets/images/goldbox/check_length.png)
 
 Subsequently, several characters are compared to the character `-`. This tells us that the key consists of 4 groups of 4 characters each, separated by dashes.
 
-![](/images/goldbox/check_dash.png)
+![](/assets/images/goldbox/check_dash.png)
 
 ## The First 8 Characters
 
 I found that the first 8 characters were being compared to the characters in a long string. Initially, I thought that the key had to match the first 8 characters of this string, but on closer inspection I found that the program would accept any set of 8 characters that consisted only of letters appearing in the first half of the string (`OFCKANLUPEQDHXTYWBMI`).
 
-![](/images/goldbox/string_table.png)
+![](/assets/images/goldbox/string_table.png)
 
 The set of 8 characters that we choose from the first half of the string are used as the input for a validation function that determines the second 8 characters of our key. The second 8 characters are uniquely determined by this validation function: the program generates the remaining part of the key, then compares the rest of our input to it.
 
@@ -70,7 +70,7 @@ def get_indices(key):
 
 The newly generated string then has a series of transformations applied to it. Tracing through the program's execution, I found that the string was being passed to a function that referenced the values `0xcbf29ce484222325` and `0x100000001b3`. On closer inspection, I found that these values were actually constants hard-coded into the binary:
 
-![](/images/goldbox/fnv_consts.png)
+![](/assets/images/goldbox/fnv_consts.png)
 
 I Googled these values and found that they were used as the initial state of the [FNV-1 hash function](https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function). Checking the output of the function in the binary, I verified that it was consistent with the FNV-1 hash of the string.
 
@@ -87,7 +87,7 @@ def fnv1_64(data):
 
 This hash was then passed into a variation of the [xorshift](https://en.wikipedia.org/wiki/Xorshift) PRNG algorithm.
 
-![](/images/goldbox/xorshift.png)
+![](/assets/images/goldbox/xorshift.png)
 
 Fortunately, this was one of the few functions that actually had reasonable-looking decompilation, so it was pretty straightforward to replicate:
 
@@ -108,7 +108,7 @@ I then found that a second 256-byte array was being generated. The obfuscated di
 
 I found that an array was being initialized with the values 0 to 255. The values in the array were then replaced with different values in order, one byte at a time.
 
-![](/images/goldbox/goldbox_rc4.png)
+![](/assets/images/goldbox/goldbox_rc4.png)
 
 This was already enough to suggest to me that RC4 was being used. On closer inspection, I found that the first 256-byte array was being used as a key to derive the second array using RC4.
 
@@ -125,7 +125,7 @@ while len(indices) < 4:
 
 The 4 resulting bytes are then used to index into the first 16 characters of the long string (`OFCKANLUPEQDHXTY`), creating a new string of 8 capital letters.
 
-![](/images/goldbox/get_final_letters.png)
+![](/assets/images/goldbox/get_final_letters.png)
 
 ```python
 second_key = ''

@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "Analyzing TeslaCrypt"
 date:   2023-03-17 22:27:00 -0400
 categories: malware
@@ -13,23 +13,23 @@ TeslaCrypt was a ransomware strain from 2015. It targeted home users and demande
 
 The sample I looked at contained strings relating to the program DVD-Cloner, indicating that this malware spread by impersonating legitimate binaries.
 
-![](/images/teslacrypt/dvd_cloner.png)
+![](/assets/images/teslacrypt/dvd_cloner.png)
 
 We can also see that the program contains a section with very high entropy, indicating that the ransomware payload is encrypted. The easiest way to dump the decrypted program is to set a breakpoint at `VirtualProtect` and look at the address that is marked as executable.
 
-![](/images/teslacrypt/entropy.png)
+![](/assets/images/teslacrypt/entropy.png)
 
 The first time the program is run, it moves itself to `%APPDATA%` and saves itself under a random name. After this, the program exits, but it creates a new process with another copy of itself. Attaching the debugger to this process, we find that this copy of the ransomware is actually responsible for performing the encryption.
 
 Once the files are encrypted, the extension `.zzz` is appended, and ransom notes called `help_restore_files_[random extension].txt` and `help_restore_files_[random extension].html` are dropped in each directory. The ransom note claims that it is CryptoWall 3.0 and that RSA-2048 was used in the encryption, none of which is true.
 
-![](/images/teslacrypt/ransom_note.png)
+![](/assets/images/teslacrypt/ransom_note.png)
 
 ## The Encryption Scheme
 
 The program uses the open-source cryptography libraries from OpenSSL to perform the encryption. Specifically, it uses the `bn` library to handle arbitrarily large numbers and the `ec` library to perform encryption based on elliptic curves. In fact, the program contains strings that reveal many of the specific .c files that are in use, making it relatively straightforward to match functions in the decompiled code to functions in the OpenSSL libraries.
 
-![](/images/teslacrypt/openssl_strings.png)
+![](/assets/images/teslacrypt/openssl_strings.png)
 
 ### AES Encryption
 
@@ -51,7 +51,7 @@ y = 0xff10f31537a476feef8080cfb27a7ce5833b3b16765390a5e756f30b276f6c4a
 
 ### The File Header
 
-![](/images/teslacrypt/factored_header.png)
+![](/assets/images/teslacrypt/factored_header.png)
 
 After the AES encryption, the program writes the following values to the file header:
 * The Round 1 public key.
@@ -62,7 +62,7 @@ After the AES encryption, the program writes the following values to the file he
 
 ### The HTTP Request
 
-![](/images/teslacrypt/http_request.png)
+![](/assets/images/teslacrypt/http_request.png)
 
 The program sends out an AES-encrypted HTTP request to the C2 server containing the Round 1 private key. The hex string in this request is encrypted using the hard-coded key
 ```
@@ -74,7 +74,7 @@ and initialization vector
 DE AD BE EF 00 00 BE EF DE AD 00 00 BE EF DE AD
 ```
 
-![](/images/teslacrypt/http_decrypted.png)
+![](/assets/images/teslacrypt/http_decrypted.png)
 
 
 Once we decrypt the HTTP request, there are a few interesting fields. `key` is the private key, and `addr` is a Bitcoin wallet address. `ip` is the victim's IP address retrieved from `ipinfo.io`, though it is malformed in the screenshot above because I did not recreate the `ipinfo.io` site on my simulated network.  `gate` is always `G1`, and I'm unsure what it refers to. Finally, `inst_id` is the victim ID given in the ransom note.
@@ -83,7 +83,7 @@ If this request were to be intercepted, it would be possible to use the hard-cod
 
 ### The Registry Key
 
-![](/images/teslacrypt/reg_key.png)
+![](/assets/images/teslacrypt/reg_key.png)
 
 In order to ensure that the same Round 1 keypair is always used, the program creates a registry key under `HKCU\Software\[victim ID number]`. The key contains the value of the Round 1 public key, the first product, a Bitcoin wallet address, and the time of encryption. If this registry key is present, the program reads these values and reuses them rather than generate a new Round 1 keypair. However, even if the registry key is present, the program will still generate a new AES key if it is stopped and run again.
 

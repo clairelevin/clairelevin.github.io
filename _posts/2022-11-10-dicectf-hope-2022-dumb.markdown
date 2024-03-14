@@ -1,5 +1,5 @@
 ---
-layout: single
+layout: post
 title:  "DiceCTF @ HOPE 2022 - dumb"
 date:   2022-11-10 16:10:35 -0500
 categories: ctf
