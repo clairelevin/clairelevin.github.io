@@ -95,7 +95,7 @@ li {
  */
 h1, h2, h3, h4, h5, h6 {
   color: $brand-color;
-  font-weight: $base-font-weight;
+  font-weight: bold;
 }
 
 
@@ -150,6 +150,7 @@ blockquote {
 pre,
 code {
   @include relative-font-size(0.9375);
+  font-family: $base-font-family;
   border: 1px solid $border-color-01;
   border-radius: 3px;
   background-color: $code-background-color;

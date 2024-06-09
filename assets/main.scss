@@ -1,14 +1,7 @@
 ---
 ---
-@font-face {
-    font-family: 'liberation_monoregular';
-    src: url('../assets/fonts/LiberationMono-Regular-webfont.woff') format('woff');
-    font-weight: normal;
-    font-style: normal;
 
-}
-
-$base-font-family: liberation_monoregular;
+$base-font-family: 'courier new', monospace;
 $base-font-size:   16px !default;
 $base-font-weight: 400 !default;
 $small-font-size:  $base-font-size * 0.875 !default;
@@ -25,7 +18,7 @@ $brand-color-dark:      darken($brand-color, 35%) !default;
 $site-title-color:      $brand-color-light !default;
 
 $text-color:            #dddddd !default;
-$background-color:      #181818 !default;
+$background-color:      #000000 !default;
 $code-background-color: #212121 !default;
 
 $link-base-color:       #79b8ff !default;
