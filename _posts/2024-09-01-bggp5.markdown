@@ -1,0 +1,261 @@
+---
+layout: post
+title:  "BGGP5: Download"
+date:   2024-09-01 12:20:00 -0400
+categories: bggp
+excerpt: Constructing a tiny ELF file
+---
+This year, I participated in the [Binary Golf Grand Prix](https://binary.golf/), a competition where the goal is to create the smallest possible binary to accomplish a given task. The theme of this year's event was "Download", and the goal was to create the smallest program that could download and display the text file at `https://binary.golf/5/5`.
+
+I decided to make my entry an ELF x86_64 binary. Since this is my first attempt at doing this sort of thing, I was more focused on learning about the ELF file format than I was on being competitive. Most of the techniques I used for this are already pretty well known, and I recommend checking out the articles I link to throughout this writeup to get a more in-depth understanding of how these techniques work. I was also pretty surprised by how much of a difference there was between an executable produced by gcc and an executable created manually - the ELF produced by gcc without any special compiler flags was nearly 100 times the size of my final entry! Throughout this writeup, I've tried to explain where all that extra overhead comes from. 
+
+## A First Attempt
+
+I started off with a simple assembly program that prints the contents of the BGGP5 page using `curl`. (One could argue that it's cheating to call an external binary to do all the work for you, but unfortunately I didn't have enough free time this month to learn how SSL works.)
+
+```
+section .data
+    path:  db "/bin/curl", 0
+    arg:   db "https://binary.golf/5/5", 0
+
+    argv:   dq path, arg
+    dq 0
+
+section .text
+    global _start
+
+_start:
+    mov rdi, path
+    mov rsi, argv
+    xor rdx, rdx
+    mov rax, 59 ; sys_execve
+    syscall
+```
+
+These instructions take up 30 bytes:
+
+```
+00000000: 48 bf 00 20 40 00 00 00 00 00 48 be 22 20 40 00  H.. @.....H." @.
+00000010: 00 00 00 00 48 31 d2 b8 3b 00 00 00 0f 05        ....H1..;.....
+```
+To get a sense of what the compiler would normally produce, we'll start by compiling the binary in the most naive way possible, without any tricks. The resulting executable is 13696 bytes, which is certainly a lot more than we'd expect from a sequence of instructions that's only 30 bytes long! Stripping symbols with the `-s` flag helps a little, but not by much - we're still at 13224 bytes.
+
+Looking at the output of `readelf`, we can see a list of 13 sections:
+
+```
+Section Headers:
+  [Nr] Name              Type             Address           Offset      Size              EntSize          Flags  Link  Info  Align
+  [ 0]                   NULL             0000000000000000  00000000    0000000000000000  0000000000000000           0     0     0
+  [ 1] .interp           PROGBITS         0000000000000238  00000238    000000000000001c  0000000000000000   A       0     0     1
+  [ 2] .note.gnu.bu[...] NOTE             0000000000000254  00000254    0000000000000024  0000000000000000   A       0     0     4
+  [ 3] .gnu.hash         GNU_HASH         0000000000000278  00000278    000000000000001c  0000000000000000   A       4     0     8
+  [ 4] .dynsym           DYNSYM           0000000000000298  00000298    0000000000000018  0000000000000018   A       5     1     8
+  [ 5] .dynstr           STRTAB           00000000000002b0  000002b0    0000000000000001  0000000000000000   A       0     0     1
+  [ 6] .rela.dyn         RELA             00000000000002b8  000002b8    0000000000000060  0000000000000018   A       4     0     8
+  [ 7] .text             PROGBITS         0000000000001000  00001000    000000000000001e  0000000000000000  AX       0     0     16
+  [ 8] .eh_frame         PROGBITS         0000000000002000  00002000    0000000000000000  0000000000000000   A       0     0     8
+  [ 9] .dynamic          DYNAMIC          0000000000002ee0  00002ee0    0000000000000120  0000000000000010  WA       5     0     8
+  [10] .data             PROGBITS         0000000000003000  00003000    000000000000003a  0000000000000000  WA       0     0     4
+  [11] .symtab           SYMTAB           0000000000000000  00003040    0000000000000108  0000000000000018          12     7     8
+  [12] .strtab           STRTAB           0000000000000000  00003148    0000000000000038  0000000000000000           0     0     1
+  [13] .shstrtab         STRTAB           0000000000000000  00003180    0000000000000079  0000000000000000  
+ ```
+
+When I was experimenting, I found that if I disabled PIE with the `-no-pie` flag, the `.interp`, `.gnu.hash`, `.dynsym`, `.dynstr`, `.rela.dyn`, `.eh_frame`, `.dynamic`, `.symtab`, and `.strtab` sections were no longer present, resulting in a file that's 8616 bytes. That's still pretty bad, but it's a significant decrease in size. 
+
+These extra sections are related to the relocations necessary to run a position-independent executable. Since a position-independent executable could potentially be loaded at any base address, the program needs to store metadata describing what addresses need to be modified. For example, the instruction `mov rdi, path` is represented as `mov rdi, 0x3000` (`48 bf 00 30 00 00 00 00 00 00`) when viewed in a disassembler, but when we run the program in GDB the disassembly reads `movabs rdi, 0x555555557000` (`48 bf 00 70 55 55 55 55 00 00`). The relocation information indicated that the address `0x3000` was a relative address that needed to be added to the base address `0x555555554000`.
+
+However, if we disable PIE, we don't need to relocate anything - we know that `path` will always be loaded at the address `0x402000`, so the instruction `mov rdi, path` can simply be represented as `mov rdi, 0x402000` in the `.text` section.
+
+## Section Alignment
+
+8616 bytes is still a lot for such a simple program, so what's going on? Looking at the executable in a hex editor, the most obvious problem is that the instructions in the `.text` section are followed by a sequence of null bytes much longer than the instructions themselves.
+
+```
+00000000: 48 bf 00 20 40 00 00 00 00 00 48 be 22 20 40 00  H.. @.....H." @.
+00000010: 00 00 00 00 48 31 d2 b8 3b 00 00 00 0f 05 00 00  ....H1..;.......
+00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+00000040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+```
+
+The reason for this has to do with page alignment. Since our executable contains sections with different permissions (`.text` has permissions `r-x`, and `.data` section has permissions `rw-`), the sections must be loaded in different pages. In order to handle this, padding bytes are inserted so that both the `.text` and `.data` sections start at a page-aligned address.
+
+We can deal with this by passing the `-N` option to ld. This combines the `.text` and `.data` sections into a single `rwx` segment, thus removing the need for padding. Without the padding, our file is down to 680 bytes - a marked improvement over our earlier attempts, but still not great.
+
+## Building an ELF file manually
+
+Let's take a look at what's left in the file at this point:
+
+* The ELF header (64 bytes), program headers (56 * 2 = 112 bytes), and section headers (64 * 5 = 320 bytes).
+* The `.text` section containing the instructions themselves (30 bytes).
+* The `.data` section containing the arguments to `curl` (58 bytes).
+* The `.note.gnu.build-id` section (36 bytes).
+* The `.shstrtab` section (42 bytes).
+* Sequences of 0x00 bytes to keep the sections 16 byte aligned (20 bytes).
+
+We clearly need the instructions in the `.text` section and the arguments in the `.data` section, but the other sections are completely unnecessary. How do we compile a binary without them?
+
+At this point, we're running out of ways to tell the compiler to generate a smaller binary for us, so it's time to start doing things by hand. We can create a minimal ELF file that doesn't contain any extraeneous information, then insert our data and instructions into it manually. To do so, we'll construct the ELF headers ourselves and compile the executable as a flat binary in nasm, which gets us to 208 bytes. Brian Raiter's [writeup](https://muppetlabs.com/~breadbox/software/tiny/teensy.html) on tiny ELF files was extremely helpful for me in figuring out how to do this.
+
+Our program so far:
+
+```
+BITS 64
+org 0x400000
+
+ehdr:
+    db 7Fh, "ELF"   ; magic
+    db 2    ; class
+    db 1    ; encoding
+    db 1    ; version
+    db 0    ; os
+    db 0    ; abi_version
+    db 0,0,0,0,0,0,0    ; padding
+
+    dw 2    ; e_type
+    dw 3Eh  ; e_machine
+    dd 1    ; e_version
+    dq _start  ; e_entry
+    dq phdr - $$  ; e_phoff
+    dq 0 ; e_shoff
+    dd 0    ; e_flags
+    dw ehdrsize  ; e_ehsize
+    dw phdrsize ; e_phentsize
+    dw 1    ; e_phnum
+    dw 0  ; e_shentsize
+    dw 0    ; e_shnum
+    dw 0    ; e_shstrndx
+
+ehdrsize equ $ - ehdr
+
+phdr:
+    dd 1    ; p_type
+    dd 7    ; p_flags
+    dq 0  ; p_offset
+    dq $$  ; p_vaddr
+    dq $$  ; p_paddr
+    dq filesize ; p_filesz
+    dq filesize ; p_memsz
+    dq 0x10 ; p_align
+
+phdrsize equ $ - phdr
+
+args:
+    path:  db "/bin/curl", 0 
+    arg:   db "https://binary.golf/5/5", 0
+
+    argv:   dq path, arg
+    dq 0
+
+_start:
+    mov rdi, path
+    mov rsi, argv
+    xor rdx, rdx
+    mov rax, 59 ; sys_execve
+    syscall
+
+filesize equ $ - $$
+```
+
+(When I was troubleshooting, I also found that GDB no longer recognizes our program as a valid executable, presumably because we don't have a section header. I'm a little surprised I haven't run into any malware that uses this as an anti-debugging technique.)
+
+## Storing data in the headers
+
+There are a few fields in the ELF header that aren't necessary for our executable to run. The 7-byte `padding` field is an obvious first place to try storing data, and the path `/bin/curl` isn't much longer than that. Turns out the `version`, `os`, and `abi_version` fields don't matter either, so we can modify the start of the ELF header to look like this:
+
+```
+ehdr:
+    db 7Fh, "ELF"   ; magic
+    db 2    ; class
+    db 1    ; encoding
+    
+    path:
+    db "/bin/curl", 0 ; version, os, abi_version, padding
+```
+
+The `p_align` field at the end of the program header also isn't used, so we can use that space to instead store the first 8 bytes of the URL `https://binary.golf/5/5`. In addition, it seems that the area in memory immediately after our executable code is filled with 0s, so if we put `argv` right at the end of the file then it doesn't need to be null terminated.
+
+Other unused fields can be used to store the instructions themselves. The `e_shoff` field of the ELF header is unused since we don't have a section header, so we can use that field as well as the adjacent unused `e_flags` field to store 12 bytes of instructions. The `p_paddr` field of the program header can hold another 8 bytes. We can cut down a little bit on instruction size by replacing our 64-bit operands to `mov` and `xor` with 32-bit operands, thereby allowing us to fit the entirety of the program into the headers.
+
+We can also remove the last 6 bytes of the ELF header, causing it to overlap with the start of the program header. We can get away with this because `e_shentsize` and `e_shstrndx` are never parsed if we don't actually have any section headers. 
+
+Pretty much all of the tricks I used here are shamelessly stolen from Nathan Otterness' [writeup](https://nathanotterness.com/2021/10/tiny_elf_modernized.html) on small ELF files, which includes a helpful graph showing which bytes of the ELF header can be used to store arbitrary data. xcellerator's [article](https://tmpout.sh/1/1.html) on the same subject goes into some more detail on what some of these fields are and why we can overwrite them.
+
+Our final result now looks like this:
+
+```
+BITS 64
+org 0x400000
+
+ehdr:
+    db 7Fh, "ELF"   ; magic
+    db 2    ; class
+    db 1    ; encoding
+
+    path:
+    db "/bin/curl", 0 ; version, os, abi_version, padding
+    dw 2    ; e_type
+    dw 3Eh  ; e_machine
+    dd 1    ; e_version
+
+    dq _start  ; e_entry
+    dq phdr - $$  ; e_phoff
+
+    _start:
+        mov edi, path ; e_shoff, e_flags
+        mov esi, argv
+        jmp part2
+
+    dw ehdrsize  ; e_ehsize
+    dw phdrsize ; e_phentsize
+    dw 1    ; e_phnum
+
+ehdrsize equ $ + 6 - ehdr
+
+phdr:
+    dd 1    ; p_type, e_shentsize, e_shnum
+    dd 7    ; p_flags, e_shstrndx
+    dq 0  ; p_offset
+    dq $$  ; p_vaddr
+
+    part2:  ; p_paddr
+        xor edx, edx
+        xor eax, eax
+        mov al, 59 ; sys_execve
+        syscall  
+
+    dq filesize ; p_filesz
+    dq filesize; p_memsz
+
+phdrsize equ $ - phdr + 8
+filesize equ $ - $$
+
+arg:   db "https://binary.golf/5/5", 0
+argv:   dq path, arg
+```
+
+This gets us an executable that's only 146 bytes!
+
+```
+00000000: 7f45 4c46 0201 2f62 696e 2f63 7572 6c00  .ELF../bin/curl.
+00000010: 0200 3e00 0100 0000 2800 4000 0000 0000  ..>.....(.@.....
+00000020: 3a00 0000 0000 0000 bf06 0040 00be 8200  :..........@....
+00000030: 4000 eb1e 3a00 3800 0100 0100 0000 0700  @...:.8.........
+00000040: 0000 0000 0000 0000 0000 0000 4000 0000  ............@...
+00000050: 0000 31d2 31c0 b03b 0f05 6a00 0000 0000  ..1.1..;..j.....
+00000060: 0000 6a00 0000 0000 0000 6874 7470 733a  ..j.......https:
+00000070: 2f2f 6269 6e61 7279 2e67 6f6c 662f 352f  //binary.golf/5/
+00000080: 3500 0600 4000 0000 0000 6a00 4000 0000  5...@.....j.@...
+00000090: 0000  
+```
+
+## Potential Improvements
+
+I was able to produce a much smaller executable than I expected, but I still suspect it may be possible to do a little better. In particular, it's seriously bothering me that I couldn't think of a way to fit the `argv` array into the ELF header or program header somehow.
+
+When I was experimenting with this, I found that `argv[0]` doesn't have to be the path to the `curl` executable - that's just a convention, and it's not something that `curl` relies on the be true. It *does*, however, have to be a pointer to valid memory. So in order to fit `argv` into the header, you'd need to construct a pattern that looks like the following:
+
+`[any valid pointer][pointer to URL string][null terminator]`
+
+This *almost* fits in the program header - `p_vaddr` is a valid pointer, and it's followed by `p_paddr`, where we can put anything. However, the field that follows it is `p_filesz`, which we can't set to 0. I'm still not convinced it's totally impossible to sneak `argv` in somewhere, though. Maybe I'll think of it before next year's BGGP!
