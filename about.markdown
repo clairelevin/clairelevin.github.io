@@ -11,3 +11,5 @@ I also play CTFs once in a while, currently with DiceGang and formerly with Kern
 Currently, I'm trying to branch out a little and learn some new skills like vulnerability research and exploit development. I'm also interested in quantum computing and how it will affect cryptography. Hopefully, I'll be able to post a few writeups on those subjects as I learn more.
 
 If you have any questions about the writeups I've posted here, feel free to reach out to me on [Mastodon](https://haunted.computer/@amnesia).
+
+*This site is entirely my own work and does not represent my employer.*
